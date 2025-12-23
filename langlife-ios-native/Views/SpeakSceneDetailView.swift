@@ -8,6 +8,8 @@ struct SpeakSceneDetailView: View {
     @State private var revealedTranslations: Set<TranslationKey> = []
     @State private var isOutlinePresented = false
     @State private var lastAutoPlayedStep: Int?
+    @State private var activeGlossSelection: GlossSelection?
+    @State private var suppressGlossDismiss = false
     let scene: SpeakScene
 
     var body: some View {
@@ -116,7 +118,11 @@ struct SpeakSceneDetailView: View {
                         activeTranscript: speechService.partialTranscript,
                         speechError: speechService.errorMessage,
                         ttsService: ttsService,
+                        activeGlossSelection: $activeGlossSelection,
                         revealedTranslations: $revealedTranslations,
+                        onGlossInteraction: {
+                            suppressNextGlossDismiss()
+                        },
                         onRetrySpeech: { key in
                             Task {
                                 await startSpeech(for: key)
@@ -186,6 +192,13 @@ struct SpeakSceneDetailView: View {
                 .ignoresSafeArea(edges: .bottom)
             }
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                guard activeGlossSelection != nil else { return }
+                guard !suppressGlossDismiss else { return }
+                activeGlossSelection = nil
+            }
+        )
     }
 
     private func handleMicTap() async {
@@ -215,6 +228,13 @@ struct SpeakSceneDetailView: View {
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
         if !started {
             viewModel.cancelSpeech(for: key)
+        }
+    }
+
+    private func suppressNextGlossDismiss() {
+        suppressGlossDismiss = true
+        DispatchQueue.main.async {
+            suppressGlossDismiss = false
         }
     }
 }
@@ -282,7 +302,9 @@ private struct ConversationPanel: View {
     let activeTranscript: String
     let speechError: String?
     @ObservedObject var ttsService: TTSService
+    @Binding var activeGlossSelection: GlossSelection?
     @Binding var revealedTranslations: Set<TranslationKey>
+    let onGlossInteraction: () -> Void
     let onRetrySpeech: (SpeechKey) -> Void
     let onAcceptSpeech: (SpeechKey) -> Void
     let onDismissSpeechError: () -> Void
@@ -311,10 +333,13 @@ private struct ConversationPanel: View {
                     ConversationBubble(
                         role: entry.role,
                         line: entry.line,
+                        glossKey: speechKey,
                         speechTranscript: speechTranscript,
                         speechStatus: speechStatus,
                         speechScore: attempt?.score,
                         isTranslationVisible: revealedTranslations.contains(key),
+                        activeGlossSelection: $activeGlossSelection,
+                        onGlossInteraction: onGlossInteraction,
                         onToggleTranslation: {
                             toggleTranslation(for: key)
                         },
@@ -373,20 +398,36 @@ private struct ConversationPanel: View {
 private struct ConversationBubble: View {
     let role: SpeakRole
     let line: SpeakLine
+    let glossKey: SpeechKey
     let speechTranscript: String?
     let speechStatus: SpeechAttemptStatus?
     let speechScore: Double?
     let isTranslationVisible: Bool
+    @Binding var activeGlossSelection: GlossSelection?
+    let onGlossInteraction: () -> Void
     let onToggleTranslation: () -> Void
     let onRetrySpeech: () -> Void
     let onAcceptSpeech: () -> Void
     let onPlay: () -> Void
     let isPlayDisabled: Bool
-    @State private var activeGlossIndex: Int?
     @State private var calloutSize: CGSize = .zero
 
     var body: some View {
         let tokens = glossTokens
+        let activeGlossIndex = activeGlossSelection?.key == glossKey ? activeGlossSelection?.tokenIndex : nil
+        let glossBinding = Binding<Int?>(
+            get: {
+                activeGlossSelection?.key == glossKey ? activeGlossSelection?.tokenIndex : nil
+            },
+            set: { newValue in
+                onGlossInteraction()
+                if let newValue {
+                    activeGlossSelection = GlossSelection(key: glossKey, tokenIndex: newValue)
+                } else if activeGlossSelection?.key == glossKey {
+                    activeGlossSelection = nil
+                }
+            }
+        )
         HStack {
             if role == .user {
                 Spacer(minLength: 36)
@@ -399,7 +440,7 @@ private struct ConversationBubble: View {
                     .foregroundStyle(.primary)
 
                 if let tokens, !tokens.isEmpty {
-                    PinyinGlossView(tokens: tokens, activeTokenIndex: $activeGlossIndex)
+                    PinyinGlossView(tokens: tokens, activeTokenIndex: glossBinding)
                 } else if let pinyinText {
                     Text(pinyinText)
                         .font(.title3)
@@ -498,6 +539,12 @@ private struct ConversationBubble: View {
             .frame(maxWidth: 520, alignment: .leading)
             .padding(20)
             .background(cardBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if activeGlossSelection?.key == glossKey {
+                    activeGlossSelection = nil
+                }
+            }
             .overlayPreferenceValue(GlossTokenBoundsKey.self) { anchors in
                 GeometryReader { proxy in
                     if let activeGlossIndex,
@@ -532,7 +579,7 @@ private struct ConversationBubble: View {
                     }
                 }
             }
-            .onChange(of: activeGlossIndex) { _, _ in
+            .onChange(of: activeGlossSelection) { _, _ in
                 calloutSize = .zero
             }
             .onPreferenceChange(GlossCalloutSizeKey.self) { size in
@@ -613,6 +660,11 @@ private struct ConversationBubble: View {
 private struct TranslationKey: Hashable {
     let step: Int
     let role: SpeakRole
+}
+
+private struct GlossSelection: Hashable {
+    let key: SpeechKey
+    let tokenIndex: Int
 }
 
 private struct PinyinGlossView: View {
