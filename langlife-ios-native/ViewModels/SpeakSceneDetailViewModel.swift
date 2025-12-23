@@ -9,6 +9,9 @@ final class SpeakSceneDetailViewModel: ObservableObject {
     @Published private(set) var isLoadingTurn = false
     @Published private(set) var outlineError: String?
     @Published private(set) var turnError: String?
+    @Published private(set) var speechAttempts: [SpeechKey: SpeechAttempt] = [:]
+    @Published private(set) var activeSpeechKey: SpeechKey?
+    @Published private(set) var latestLoadedTurnStep: Int?
 
     private let repository: SpeakSceneDetailRepository
     private var prefetchedTurns: [Int: SpeakTurn] = [:]
@@ -35,6 +38,9 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         outlineError = nil
         turnError = nil
         turns = []
+        speechAttempts = [:]
+        activeSpeechKey = nil
+        latestLoadedTurnStep = nil
 
         defer { isLoadingOutline = false }
 
@@ -52,7 +58,62 @@ final class SpeakSceneDetailViewModel: ObservableObject {
             outline = nil
             turns = []
             prefetchedTurns = [:]
+            speechAttempts = [:]
+            activeSpeechKey = nil
+            latestLoadedTurnStep = nil
         }
+    }
+
+    var currentPracticeTarget: (key: SpeechKey, line: SpeakLine)? {
+        guard let turn = turns.max(by: { $0.step < $1.step }) else { return nil }
+        return (SpeechKey(step: turn.step, role: .user), turn.userLine)
+    }
+
+    func line(for key: SpeechKey) -> SpeakLine? {
+        guard let turn = turns.first(where: { $0.step == key.step }) else { return nil }
+        return key.role == .ai ? turn.aiLine : turn.userLine
+    }
+
+    func beginSpeech(for key: SpeechKey) {
+        activeSpeechKey = key
+        speechAttempts[key] = SpeechAttempt(transcript: "", status: .listening, score: nil)
+    }
+
+    func updateSpeechTranscript(_ transcript: String, for key: SpeechKey) {
+        guard activeSpeechKey == key else { return }
+        speechAttempts[key] = SpeechAttempt(transcript: transcript, status: .listening, score: nil)
+    }
+
+    func finalizeSpeech(transcript: String, target: String, for key: SpeechKey) async {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTranscript = trimmed.isEmpty ? (speechAttempts[key]?.transcript ?? "") : transcript
+        let normalizedTranscript = normalize(resolvedTranscript)
+        let normalizedTarget = normalize(target)
+        let score = similarityScore(normalizedTranscript, normalizedTarget)
+        let isPerfect = score >= 1.0
+        let passed = isPerfect
+
+        speechAttempts[key] = SpeechAttempt(transcript: resolvedTranscript, status: passed ? .passed : .failed, score: score)
+        activeSpeechKey = nil
+
+        guard isPerfect else { return }
+        try? await Task.sleep(nanoseconds: 450_000_000)
+        await loadNextTurn()
+    }
+
+    func acceptSpeech(for key: SpeechKey) async {
+        var attempt = speechAttempts[key] ?? SpeechAttempt(transcript: "", status: .passed, score: nil)
+        attempt.status = .passed
+        speechAttempts[key] = attempt
+        activeSpeechKey = nil
+        await loadNextTurn()
+    }
+
+    func cancelSpeech(for key: SpeechKey) {
+        if activeSpeechKey == key {
+            activeSpeechKey = nil
+        }
+        speechAttempts.removeValue(forKey: key)
     }
 
     func loadNextTurn() async {
@@ -62,11 +123,15 @@ final class SpeakSceneDetailViewModel: ObservableObject {
 
         isLoadingTurn = true
         turnError = nil
+        let existingSteps = Set(turns.map { $0.step })
         defer { isLoadingTurn = false }
 
         if let cached = prefetchedTurns[step] {
             prefetchedTurns[step] = nil
             turns = mergeTurns(existing: turns, incoming: cached)
+            if !existingSteps.contains(cached.step) {
+                latestLoadedTurnStep = cached.step
+            }
             return
         }
 
@@ -74,6 +139,9 @@ final class SpeakSceneDetailViewModel: ObservableObject {
             let turn = try await repository.fetchTurn(sceneId: outline.sceneId, step: step)
             if Task.isCancelled { return }
             turns = mergeTurns(existing: turns, incoming: turn)
+            if !existingSteps.contains(turn.step) {
+                latestLoadedTurnStep = turn.step
+            }
         } catch {
             turnError = mapErrorMessage(error, fallback: "Unable to load the next turn.")
         }
@@ -110,4 +178,62 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         return sortTurns(remaining + [incoming])
     }
 
+    private func normalize(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let converted = trimmed.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? trimmed
+        let filtered = converted.unicodeScalars.filter {
+            !CharacterSet.whitespacesAndNewlines.contains($0)
+                && !CharacterSet.punctuationCharacters.contains($0)
+                && !CharacterSet.symbols.contains($0)
+        }
+        return String(String.UnicodeScalarView(filtered)).lowercased()
+    }
+
+    private func similarityScore(_ first: String, _ second: String) -> Double {
+        if first.isEmpty && second.isEmpty { return 1 }
+        if first.isEmpty || second.isEmpty { return 0 }
+        let distance = levenshtein(Array(first), Array(second))
+        let maxLength = max(first.count, second.count)
+        return 1 - (Double(distance) / Double(maxLength))
+    }
+
+    private func levenshtein(_ first: [Character], _ second: [Character]) -> Int {
+        if first.isEmpty { return second.count }
+        if second.isEmpty { return first.count }
+
+        var previous = Array(0...second.count)
+        var current = Array(repeating: 0, count: second.count + 1)
+
+        for i in 1...first.count {
+            current[0] = i
+            for j in 1...second.count {
+                let cost = first[i - 1] == second[j - 1] ? 0 : 1
+                current[j] = min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + cost
+                )
+            }
+            previous = current
+        }
+
+        return previous[second.count]
+    }
+}
+
+struct SpeechKey: Hashable {
+    let step: Int
+    let role: SpeakRole
+}
+
+enum SpeechAttemptStatus: Equatable {
+    case listening
+    case passed
+    case failed
+}
+
+struct SpeechAttempt: Equatable {
+    let transcript: String
+    var status: SpeechAttemptStatus
+    let score: Double?
 }

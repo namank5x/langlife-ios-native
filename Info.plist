@@ -18,6 +18,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We use the microphone so you can practice speaking the scene lines.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>We use speech recognition to compare what you said with the scene text.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -40,8 +40,12 @@ final class TTSService: NSObject, ObservableObject {
     private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true, options: [])
+            try session.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.duckOthers, .allowBluetooth, .defaultToSpeaker]
+            )
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             // If the audio session fails, still attempt to speak with defaults.
         }
