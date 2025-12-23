@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SUPABASE_URL</key>
+	<string>http://192.168.0.11:54421</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH</string>
+	<key>API_BASE_URL</key>
+	<string>http://192.168.0.11:3000</string>
+	<key>GOOGLE_IOS_CLIENT_ID</key>
+	<string>1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4.apps.googleusercontent.com</string>
+	<key>GOOGLE_SERVER_CLIENT_ID</key>
+	<string>1075777048946-9do35ss4b3amla5v0t29danllgimvl7i.apps.googleusercontent.com</string>
+</dict>
+</plist>
