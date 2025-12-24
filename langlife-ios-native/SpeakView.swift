@@ -8,9 +8,12 @@
 import Auth
 import Foundation
 import SwiftUI
+import UIKit
 
 struct SpeakView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.scenePhase) private var scenePhase
+    @Binding var signInPresenter: UIViewController?
     @Binding var generateRequestID: UUID
     @Binding var isAddScenePresented: Bool
     @Binding var isAddSceneEnabled: Bool
@@ -24,6 +27,16 @@ struct SpeakView: View {
     @State private var isCreatingScene = false
     @State private var addSceneError: String?
     @State private var isGeneratingScene = false
+    @State private var localSignInPresenter: UIViewController?
+    @State private var isSigningIn = false
+    @State private var isSignInOptionsPresented = false
+    @State private var pendingSignInProvider: SignInProvider?
+    @State private var shouldStartSignIn = false
+    @State private var signInError: String?
+    @State private var signInAttemptID = 0
+    @State private var pendingSceneId: UUID?
+    @State private var pendingAddScene = false
+    @State private var pendingGenerateScene = false
 
     private let repository = SpeakRepository()
     private let creationRepository = SpeakSceneCreationRepository()
@@ -43,8 +56,7 @@ struct SpeakView: View {
 
                 ForEach(scenes) { scene in
                     Button {
-                        selectedSceneId = scene.id
-                        selectedScene = scene
+                        requestSceneSelection(scene)
                     } label: {
                         Text(scene.title)
                             .font(.subheadline)
@@ -83,8 +95,21 @@ struct SpeakView: View {
                     .foregroundStyle(.red)
                     .padding(.top, 8)
             }
+
+            if let signInError {
+                Text(signInError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .padding(.top, 8)
+            }
         }
         .background(Color(.systemGroupedBackground))
+        .background(
+            SignInPresenter(presenter: $localSignInPresenter)
+                .allowsHitTesting(false)
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+        )
         .navigationDestination(item: $selectedScene) { scene in
             SpeakSceneDetailView(scene: scene) { deletedScene in
                 scenes.removeAll { $0.id == deletedScene.id }
@@ -112,12 +137,33 @@ struct SpeakView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(
+            isPresented: $isSignInOptionsPresented,
+            onDismiss: {
+                if pendingSignInProvider == nil {
+                    clearPendingActions()
+                }
+                shouldStartSignIn = pendingSignInProvider != nil
+                startPendingSignInIfPossible()
+            },
+            content: {
+                SignInOptionsSheet(
+                    onSelect: { provider in
+                        pendingSignInProvider = provider
+                        isSignInOptionsPresented = false
+                    }
+                )
+                .presentationDetents([.height(260)])
+                .presentationDragIndicator(.visible)
+            }
+        )
         .task {
             await loadScenesIfNeeded()
         }
         .onChange(of: authManager.user?.id) { _, _ in
             Task {
                 await loadScenesIfNeeded()
+                await completePendingActionsIfNeeded()
             }
             updateAddSceneAvailability()
             updateGenerateSceneAvailability()
@@ -125,10 +171,11 @@ struct SpeakView: View {
                 addSceneError = authManager.user == nil ? "Please sign in to add a scene." : nil
             }
         }
+        .onChange(of: scenePhase) { _ in
+            startPendingSignInIfPossible()
+        }
         .onChange(of: generateRequestID) { _, _ in
-            Task {
-                await generateScene()
-            }
+            handleGenerateSceneRequest()
         }
         .onAppear {
             updateAddSceneAvailability()
@@ -141,9 +188,14 @@ struct SpeakView: View {
             updateGenerateSceneAvailability()
         }
         .onChange(of: isAddScenePresented) { _, newValue in
-            if newValue {
-                addSceneError = authManager.user == nil ? "Please sign in to add a scene." : nil
+            guard newValue else { return }
+            guard authManager.user != nil else {
+                setPendingAddScene()
+                isAddScenePresented = false
+                presentSignInOptions()
+                return
             }
+            addSceneError = nil
         }
     }
 
@@ -170,6 +222,203 @@ struct SpeakView: View {
             errorMessage = "Unable to load scenes right now."
             scenes = SpeakSceneSeed.defaults
         }
+    }
+
+    private func requestSceneSelection(_ scene: SpeakScene) {
+        guard authManager.user != nil else {
+            setPendingScene(scene)
+            presentSignInOptions()
+            return
+        }
+        selectedSceneId = scene.id
+        selectedScene = scene
+    }
+
+    private func handleGenerateSceneRequest() {
+        guard authManager.user != nil else {
+            setPendingGenerateScene()
+            presentSignInOptions()
+            return
+        }
+        Task {
+            await generateScene()
+        }
+    }
+
+    @MainActor
+    private func completePendingActionsIfNeeded() async {
+        guard authManager.user != nil else { return }
+
+        if let pendingSceneId {
+            if let scene = scenes.first(where: { $0.id == pendingSceneId }) {
+                selectedSceneId = scene.id
+                selectedScene = scene
+            }
+            self.pendingSceneId = nil
+            return
+        }
+
+        if pendingAddScene {
+            pendingAddScene = false
+            isAddScenePresented = true
+            return
+        }
+
+        if pendingGenerateScene {
+            pendingGenerateScene = false
+            await generateScene()
+        }
+    }
+
+    private func setPendingScene(_ scene: SpeakScene) {
+        pendingSceneId = scene.id
+        pendingAddScene = false
+        pendingGenerateScene = false
+    }
+
+    private func setPendingAddScene() {
+        pendingAddScene = true
+        pendingGenerateScene = false
+        pendingSceneId = nil
+    }
+
+    private func setPendingGenerateScene() {
+        pendingGenerateScene = true
+        pendingAddScene = false
+        pendingSceneId = nil
+    }
+
+    private func clearPendingActions() {
+        pendingSceneId = nil
+        pendingAddScene = false
+        pendingGenerateScene = false
+    }
+
+    private func presentSignInOptions() {
+        guard !isSigningIn else { return }
+        signInError = nil
+        pendingSignInProvider = nil
+        shouldStartSignIn = false
+        isSignInOptionsPresented = true
+    }
+
+    @MainActor
+    private func signInWithApple() async {
+        guard !isSigningIn else { return }
+        isSigningIn = true
+        signInError = nil
+        defer { isSigningIn = false }
+
+        do {
+            try await authManager.signInWithApple()
+        } catch {
+            signInError = error.localizedDescription
+            clearPendingActions()
+        }
+    }
+
+    @MainActor
+    private func signInWithGoogle() async {
+        guard !isSigningIn else { return }
+        isSigningIn = true
+        signInError = nil
+        signInAttemptID += 1
+        let attemptID = signInAttemptID
+
+        Task.detached { [attemptID] in
+            try await Task.sleep(nanoseconds: 12_000_000_000)
+            await MainActor.run {
+                guard isSigningIn, signInAttemptID == attemptID else { return }
+                isSigningIn = false
+                signInError = "Google sign-in did not start. Please try again."
+                clearPendingActions()
+            }
+        }
+
+        do {
+            let presenter = signInPresenter ?? localSignInPresenter
+            try await authManager.signInWithGoogle(presentingViewController: presenter)
+            isSigningIn = false
+        } catch {
+            isSigningIn = false
+            if isGoogleSignInCancelled(error) {
+                clearPendingActions()
+                return
+            }
+            signInError = error.localizedDescription
+            clearPendingActions()
+        }
+    }
+
+    private func isGoogleSignInCancelled(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "com.google.GIDSignIn"
+            && nsError.code == -5
+    }
+
+    private func performSignIn(_ provider: SignInProvider) async {
+        switch provider {
+        case .apple:
+            await signInWithApple()
+        case .google:
+            await signInWithGoogle()
+        }
+    }
+
+    private func startPendingSignInIfPossible() {
+        guard shouldStartSignIn, scenePhase == .active,
+              let provider = pendingSignInProvider else { return }
+        shouldStartSignIn = false
+        Task { @MainActor in
+            await Task.yield()
+            await waitForStablePresentation()
+            defer { pendingSignInProvider = nil }
+            await performSignIn(provider)
+        }
+    }
+
+    @MainActor
+    private func waitForStablePresentation() async {
+        for _ in 0..<30 {
+            guard scenePhase == .active else {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                continue
+            }
+
+            if let presenter = signInPresenter ?? localSignInPresenter {
+                let root = presenter.view.window?.rootViewController ?? presenter
+                let top = topViewController(from: root)
+                if top.view.window != nil,
+                   !top.isBeingPresented,
+                   !top.isBeingDismissed {
+                    return
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
+    private func topViewController(from rootViewController: UIViewController) -> UIViewController {
+        var topViewController = rootViewController
+        while true {
+            if let presented = topViewController.presentedViewController {
+                topViewController = presented
+                continue
+            }
+            if let navigationController = topViewController as? UINavigationController,
+               let visibleViewController = navigationController.visibleViewController {
+                topViewController = visibleViewController
+                continue
+            }
+            if let tabBarController = topViewController as? UITabBarController,
+               let selectedViewController = tabBarController.selectedViewController {
+                topViewController = selectedViewController
+                continue
+            }
+            break
+        }
+        return topViewController
     }
 
     @MainActor
@@ -272,6 +521,7 @@ struct SpeakView: View {
 
 #Preview {
     SpeakView(
+        signInPresenter: .constant(nil),
         generateRequestID: .constant(UUID()),
         isAddScenePresented: .constant(false),
         isAddSceneEnabled: .constant(true),

@@ -43,48 +43,6 @@ enum SpeakSceneSeed {
             description: "",
             tags: [],
             level: .beginner
-        ),
-        SpeakScene(
-            id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
-            title: "Taxi Pickup",
-            description: "",
-            tags: [],
-            level: .beginner
-        ),
-        SpeakScene(
-            id: UUID(uuidString: "88888888-8888-8888-8888-888888888888")!,
-            title: "Train Ticket at Station",
-            description: "",
-            tags: [],
-            level: .intermediate
-        ),
-        SpeakScene(
-            id: UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
-            title: "SIM Card Purchase",
-            description: "",
-            tags: [],
-            level: .intermediate
-        ),
-        SpeakScene(
-            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
-            title: "Clinic Visit",
-            description: "",
-            tags: [],
-            level: .intermediate
-        ),
-        SpeakScene(
-            id: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!,
-            title: "Hotel Check-In",
-            description: "",
-            tags: [],
-            level: .intermediate
-        ),
-        SpeakScene(
-            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
-            title: "Lost and Found",
-            description: "",
-            tags: [],
-            level: .intermediate
         )
     ]
 }

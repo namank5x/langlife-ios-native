@@ -28,6 +28,7 @@ struct ContentView: View {
         TabView(selection: $selection) {
             NavigationStack {
                 StudyView(
+                    signInPresenter: $signInPresenter,
                     isAddCardPresented: $isAddCardPresented,
                     isAddCardEnabled: $isAddCardEnabled
                 )
@@ -57,6 +58,7 @@ struct ContentView: View {
 
             NavigationStack {
                 SpeakView(
+                    signInPresenter: $signInPresenter,
                     generateRequestID: $generateSceneRequestID,
                     isAddScenePresented: $isAddScenePresented,
                     isAddSceneEnabled: $isAddSceneEnabled,
