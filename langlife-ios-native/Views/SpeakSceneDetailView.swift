@@ -10,6 +10,10 @@ struct SpeakSceneDetailView: View {
     @State private var lastAutoPlayedStep: Int?
     @State private var activeGlossSelection: GlossSelection?
     @State private var suppressGlossDismiss = false
+    @State private var scrollViewHeight: CGFloat = 0
+    @State private var contentMetrics: ScrollContentMetrics = .zero
+    @State private var isNearBottom = true
+    private let scrollBottomSpacerHeight: CGFloat = 140
     let scene: SpeakScene
 
     var body: some View {
@@ -97,54 +101,95 @@ struct SpeakSceneDetailView: View {
     }
 
     private var sceneContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if viewModel.isLoadingOutline && viewModel.outline == nil {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 120)
-                } else if viewModel.outline == nil, let error = viewModel.outlineError {
-                    ErrorCard(message: error) {
-                        Task {
-                            await viewModel.loadOutline(scene: scene)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if viewModel.isLoadingOutline && viewModel.outline == nil {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 120)
+                    } else if viewModel.outline == nil, let error = viewModel.outlineError {
+                        ErrorCard(message: error) {
+                            Task {
+                                await viewModel.loadOutline(scene: scene)
+                            }
                         }
+                    } else if viewModel.outline != nil {
+                        ConversationPanel(
+                            turns: viewModel.turns,
+                            isLoadingTurn: viewModel.isLoadingTurn,
+                            turnError: viewModel.turnError,
+                            speechAttempts: viewModel.speechAttempts,
+                            activeSpeechKey: viewModel.activeSpeechKey,
+                            activeTranscript: speechService.partialTranscript,
+                            speechError: speechService.errorMessage,
+                            ttsService: ttsService,
+                            activeGlossSelection: $activeGlossSelection,
+                            revealedTranslations: $revealedTranslations,
+                            onGlossInteraction: {
+                                suppressNextGlossDismiss()
+                            },
+                            onRetrySpeech: { key in
+                                Task {
+                                    await startSpeech(for: key)
+                                }
+                            },
+                            onAcceptSpeech: { key in
+                                Task {
+                                    await viewModel.acceptSpeech(for: key)
+                                }
+                            },
+                            onDismissSpeechError: {
+                                speechService.clearError()
+                            },
+                            onNext: {
+                                Task {
+                                    await viewModel.loadNextTurn()
+                                }
+                            },
+                            bottomSpacerHeight: scrollBottomSpacerHeight
+                        )
                     }
-                } else if viewModel.outline != nil {
-                    ConversationPanel(
-                        turns: viewModel.turns,
-                        isLoadingTurn: viewModel.isLoadingTurn,
-                        turnError: viewModel.turnError,
-                        speechAttempts: viewModel.speechAttempts,
-                        activeSpeechKey: viewModel.activeSpeechKey,
-                        activeTranscript: speechService.partialTranscript,
-                        speechError: speechService.errorMessage,
-                        ttsService: ttsService,
-                        activeGlossSelection: $activeGlossSelection,
-                        revealedTranslations: $revealedTranslations,
-                        onGlossInteraction: {
-                            suppressNextGlossDismiss()
-                        },
-                        onRetrySpeech: { key in
-                            Task {
-                                await startSpeech(for: key)
-                            }
-                        },
-                        onAcceptSpeech: { key in
-                            Task {
-                                await viewModel.acceptSpeech(for: key)
-                            }
-                        },
-                        onDismissSpeechError: {
-                            speechService.clearError()
-                        },
-                        onNext: {
-                            Task {
-                                await viewModel.loadNextTurn()
-                            }
-                        }
+                }
+                .padding(16)
+                .background(
+                    GeometryReader { contentProxy in
+                        Color.clear.preference(
+                            key: ScrollContentMetricsKey.self,
+                            value: ScrollContentMetrics(
+                                height: contentProxy.size.height,
+                                minY: contentProxy.frame(in: .named("conversation-scroll")).minY
+                            )
+                        )
+                    }
+                )
+            }
+            .coordinateSpace(name: "conversation-scroll")
+            .background(
+                GeometryReader { scrollProxy in
+                    Color.clear.preference(
+                        key: ScrollViewHeightKey.self,
+                        value: scrollProxy.size.height
                     )
                 }
+            )
+            .onPreferenceChange(ScrollContentMetricsKey.self) { metrics in
+                contentMetrics = metrics
+                updateIsNearBottom()
             }
-            .padding(16)
+            .onPreferenceChange(ScrollViewHeightKey.self) { height in
+                scrollViewHeight = height
+                updateIsNearBottom()
+            }
+            .onChange(of: viewModel.latestLoadedTurnStep) { _, step in
+                guard let step else { return }
+                guard isNearBottom else { return }
+                Task {
+                    await Task.yield()
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(ScrollAnchor.bottom, anchor: .bottom)
+                    }
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack {
@@ -237,6 +282,16 @@ struct SpeakSceneDetailView: View {
             suppressGlossDismiss = false
         }
     }
+
+    private func updateIsNearBottom() {
+        let threshold: CGFloat = 120
+        guard scrollViewHeight > 0 else {
+            isNearBottom = true
+            return
+        }
+        let distanceFromBottom = contentMetrics.height + contentMetrics.minY - scrollViewHeight
+        isNearBottom = distanceFromBottom <= threshold
+    }
 }
 
 private struct OutlinePanel: View {
@@ -309,6 +364,7 @@ private struct ConversationPanel: View {
     let onAcceptSpeech: (SpeechKey) -> Void
     let onDismissSpeechError: () -> Void
     let onNext: () -> Void
+    let bottomSpacerHeight: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -320,43 +376,46 @@ private struct ConversationPanel: View {
             }
 
             ForEach(orderedTurns) { turn in
-                let sequence = lineSequence(for: turn)
-                ForEach(Array(sequence.enumerated()), id: \.offset) { _, entry in
-                    let key = TranslationKey(step: turn.step, role: entry.role)
-                    let speechKey = SpeechKey(step: turn.step, role: entry.role)
-                    let isActiveSpeech = activeSpeechKey == speechKey
-                    let attempt = speechAttempts[speechKey]
-                    let speechTranscript = isActiveSpeech
-                    ? (activeTranscript.isEmpty ? attempt?.transcript : activeTranscript)
-                    : attempt?.transcript
-                    let speechStatus = isActiveSpeech ? .listening : attempt?.status
-                    ConversationBubble(
-                        role: entry.role,
-                        line: entry.line,
-                        glossKey: speechKey,
-                        speechTranscript: speechTranscript,
-                        speechStatus: speechStatus,
-                        speechScore: attempt?.score,
-                        isTranslationVisible: revealedTranslations.contains(key),
-                        activeGlossSelection: $activeGlossSelection,
-                        onGlossInteraction: onGlossInteraction,
-                        onToggleTranslation: {
-                            toggleTranslation(for: key)
-                        },
-                        onRetrySpeech: {
-                            onRetrySpeech(speechKey)
-                        },
-                        onAcceptSpeech: {
-                            onAcceptSpeech(speechKey)
-                        },
-                        onPlay: {
-                            Task {
-                                await ttsService.play(text: entry.line.chinese)
-                            }
-                        },
-                        isPlayDisabled: ttsService.isLoading || ttsService.isPlaying
-                    )
+                VStack(alignment: .leading, spacing: 16) {
+                    let sequence = lineSequence(for: turn)
+                    ForEach(Array(sequence.enumerated()), id: \.offset) { _, entry in
+                        let key = TranslationKey(step: turn.step, role: entry.role)
+                        let speechKey = SpeechKey(step: turn.step, role: entry.role)
+                        let isActiveSpeech = activeSpeechKey == speechKey
+                        let attempt = speechAttempts[speechKey]
+                        let speechTranscript = isActiveSpeech
+                        ? (activeTranscript.isEmpty ? attempt?.transcript : activeTranscript)
+                        : attempt?.transcript
+                        let speechStatus = isActiveSpeech ? .listening : attempt?.status
+                        ConversationBubble(
+                            role: entry.role,
+                            line: entry.line,
+                            glossKey: speechKey,
+                            speechTranscript: speechTranscript,
+                            speechStatus: speechStatus,
+                            speechScore: attempt?.score,
+                            isTranslationVisible: revealedTranslations.contains(key),
+                            activeGlossSelection: $activeGlossSelection,
+                            onGlossInteraction: onGlossInteraction,
+                            onToggleTranslation: {
+                                toggleTranslation(for: key)
+                            },
+                            onRetrySpeech: {
+                                onRetrySpeech(speechKey)
+                            },
+                            onAcceptSpeech: {
+                                onAcceptSpeech(speechKey)
+                            },
+                            onPlay: {
+                                Task {
+                                    await ttsService.play(text: entry.line.chinese)
+                                }
+                            },
+                            isPlayDisabled: ttsService.isLoading || ttsService.isPlaying
+                        )
+                    }
                 }
+                .id(turn.step)
             }
 
             if isLoadingTurn {
@@ -371,7 +430,9 @@ private struct ConversationPanel: View {
             if let speechError {
                 ErrorCard(message: speechError, actionTitle: "Dismiss", onAction: onDismissSpeechError)
             }
-
+            Color.clear
+                .frame(height: bottomSpacerHeight)
+                .id(ScrollAnchor.bottom)
         }
     }
 
@@ -803,6 +864,33 @@ private struct GlossCalloutTextSizeKey: PreferenceKey {
             value = next
         }
     }
+}
+
+private struct ScrollContentMetrics: Equatable {
+    let height: CGFloat
+    let minY: CGFloat
+
+    static let zero = ScrollContentMetrics(height: 0, minY: 0)
+}
+
+private struct ScrollContentMetricsKey: PreferenceKey {
+    static var defaultValue: ScrollContentMetrics = .zero
+
+    static func reduce(value: inout ScrollContentMetrics, nextValue: () -> ScrollContentMetrics) {
+        value = nextValue()
+    }
+}
+
+private struct ScrollViewHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private enum ScrollAnchor {
+    static let bottom = "conversation-scroll-bottom"
 }
 
 private struct ErrorCard: View {
