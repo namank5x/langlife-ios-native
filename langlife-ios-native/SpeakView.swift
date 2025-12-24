@@ -86,7 +86,16 @@ struct SpeakView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationDestination(item: $selectedScene) { scene in
-            SpeakSceneDetailView(scene: scene)
+            SpeakSceneDetailView(scene: scene) { deletedScene in
+                scenes.removeAll { $0.id == deletedScene.id }
+                if scenes.isEmpty {
+                    scenes = SpeakSceneSeed.defaults
+                }
+                if selectedSceneId == deletedScene.id {
+                    selectedSceneId = nil
+                }
+                selectedScene = nil
+            }
         }
         .sheet(isPresented: $isAddScenePresented) {
             AddSceneSheet(

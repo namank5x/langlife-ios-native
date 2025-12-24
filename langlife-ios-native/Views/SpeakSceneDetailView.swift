@@ -3,11 +3,16 @@ import UIKit
 
 struct SpeakSceneDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var authManager: AuthManager
     @StateObject private var viewModel = SpeakSceneDetailViewModel()
     @StateObject private var ttsService = TTSService()
     @StateObject private var speechService = SpeechInputService()
     @State private var revealedTranslations: Set<TranslationKey> = []
     @State private var isOutlinePresented = false
+    @State private var isDeleteConfirmationPresented = false
+    @State private var isDeletingScene = false
+    @State private var deleteError: String?
     @State private var lastAutoPlayedStep: Int?
     @State private var activeGlossSelection: GlossSelection?
     @State private var suppressGlossDismiss = false
@@ -18,7 +23,9 @@ struct SpeakSceneDetailView: View {
     private let scrollBottomSpacerHeight: CGFloat = 140
     private let micButtonSize = CGSize(width: 132, height: 64)
     private let micCornerRadius: CGFloat = 22
+    private let deletionRepository = SpeakSceneDeletionRepository()
     let scene: SpeakScene
+    let onDelete: (SpeakScene) -> Void
 
     var body: some View {
         sceneContent
@@ -27,6 +34,35 @@ struct SpeakSceneDetailView: View {
         .navigationTitle(scene.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(role: .destructive) {
+                        isDeleteConfirmationPresented = true
+                    } label: {
+                        Label("Delete scene", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("Scene actions")
+                .disabled(isDeletingScene)
+            }
+        }
+        .confirmationDialog(
+            "Delete this scene?",
+            isPresented: $isDeleteConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete scene", role: .destructive) {
+                Task {
+                    await deleteScene()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
         .task(id: scene.id) {
             speechService.reset()
             lastAutoPlayedStep = nil
@@ -132,6 +168,11 @@ struct SpeakSceneDetailView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if let deleteError {
+                        ErrorCard(message: deleteError, actionTitle: "Dismiss") {
+                            self.deleteError = nil
+                        }
+                    }
                     if viewModel.isLoadingOutline && viewModel.outline == nil {
                         ProgressView()
                             .frame(maxWidth: .infinity, minHeight: 120)
@@ -313,6 +354,43 @@ struct SpeakSceneDetailView: View {
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
         if !started {
             viewModel.cancelSpeech(for: target.key)
+        }
+    }
+
+    @MainActor
+    private func deleteScene() async {
+        guard !isDeletingScene else { return }
+        guard authManager.user != nil else {
+            deleteError = "Please sign in to delete this scene."
+            return
+        }
+
+        isDeletingScene = true
+        deleteError = nil
+        defer { isDeletingScene = false }
+
+        do {
+            try await deletionRepository.deleteScene(id: scene.id)
+            onDelete(scene)
+            dismiss()
+        } catch {
+            deleteError = mapDeleteSceneError(error)
+        }
+    }
+
+    private func mapDeleteSceneError(_ error: Error) -> String {
+        guard let apiError = error as? APIClientError else {
+            return "Unable to delete this scene right now."
+        }
+
+        switch apiError {
+        case .httpError(let statusCode):
+            switch statusCode {
+            case 401:
+                return "Please sign in to delete this scene."
+            default:
+                return "Unable to delete this scene right now."
+            }
         }
     }
 
@@ -1006,5 +1084,6 @@ private struct ErrorCard: View {
         description: "Practice ordering a drink with sugar and ice preferences.",
         tags: [],
         level: .beginner
-    ))
+    )) { _ in }
+    .environmentObject(AuthManager.shared)
 }

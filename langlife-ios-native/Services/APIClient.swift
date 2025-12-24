@@ -31,6 +31,24 @@ struct APIClient {
 
         return data
     }
+
+    func delete(_ path: String) async throws -> Data {
+        let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var request = URLRequest(url: baseURL.appendingPathComponent(normalizedPath))
+        request.httpMethod = "DELETE"
+
+        if let token = await accessTokenProvider() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode >= 400 {
+            throw APIClientError.httpError(statusCode: httpResponse.statusCode)
+        }
+
+        return data
+    }
 }
 
 enum APIClientError: Error {
