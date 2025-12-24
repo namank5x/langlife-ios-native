@@ -17,7 +17,6 @@ struct SettingsView: View {
     @State private var pendingSignInProvider: SignInProvider?
     @State private var shouldStartSignIn = false
     @State private var errorMessage: String?
-    @State private var signInAttemptID = 0
 
     var body: some View {
         NavigationStack {
@@ -122,17 +121,6 @@ struct SettingsView: View {
         guard !isSigningIn else { return }
         isSigningIn = true
         errorMessage = nil
-        signInAttemptID += 1
-        let attemptID = signInAttemptID
-
-        Task.detached { [attemptID] in
-            try await Task.sleep(nanoseconds: 12_000_000_000)
-            await MainActor.run {
-                guard isSigningIn, signInAttemptID == attemptID else { return }
-                isSigningIn = false
-                errorMessage = "Google sign-in did not start. Please try again."
-            }
-        }
 
         do {
             let presenter = signInPresenter ?? localSignInPresenter

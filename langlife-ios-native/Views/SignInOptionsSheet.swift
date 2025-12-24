@@ -14,14 +14,6 @@ struct SignInOptionsSheet: View {
                 .font(.headline)
 
             Button {
-                onSelect(.apple)
-            } label: {
-                Label("Sign in with Apple", systemImage: "apple.logo")
-                    .frame(maxWidth: .infinity, minHeight: 48)
-            }
-            .neutralProminentButton()
-
-            Button {
                 onSelect(.google)
             } label: {
                 Text("Sign in with Google")
