@@ -18,18 +18,25 @@ struct ContentView: View {
     @State private var selection: Tab = .study
     @State private var isSettingsPresented = false
     @State private var randomSceneRequestID = UUID()
+    @State private var isAddCardPresented = false
+    @State private var isAddCardEnabled = true
 
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack {
-                StudyView()
+                StudyView(
+                    isAddCardPresented: $isAddCardPresented,
+                    isAddCardEnabled: $isAddCardEnabled
+                )
                     .toolbar {
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             Button {
+                                isAddCardPresented = true
                             } label: {
                                 Image(systemName: "plus")
                             }
-                            .accessibilityLabel("Add")
+                            .accessibilityLabel("Add card")
+                            .disabled(!isAddCardEnabled)
 
                             Button {
                                 isSettingsPresented = true

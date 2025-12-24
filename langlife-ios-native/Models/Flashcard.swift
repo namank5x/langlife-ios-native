@@ -130,6 +130,25 @@ extension Flashcard {
         )
     }
 
+    static func newCard(chinese: String, pinyin: String, english: String) -> Flashcard {
+        Flashcard(
+            id: UUID(),
+            chinese: chinese,
+            pinyin: pinyin,
+            english: english,
+            example: nil,
+            examplePinyin: nil,
+            exampleEnglish: nil,
+            state: .new,
+            stability: 0,
+            difficulty: 0.3,
+            lastReviewAt: nil,
+            lapses: 0,
+            reps: 0,
+            learningStep: 0
+        )
+    }
+
     func toInsert(userId: UUID) -> FlashcardInsert {
         FlashcardInsert(
             id: id,

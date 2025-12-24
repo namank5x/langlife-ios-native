@@ -10,6 +10,8 @@ import SwiftUI
 
 struct StudyView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @Binding var isAddCardPresented: Bool
+    @Binding var isAddCardEnabled: Bool
 
     @State private var cards: [Flashcard] = []
     @State private var queue: [QueuedCard] = []
@@ -17,6 +19,8 @@ struct StudyView: View {
     @State private var consecutiveFailures = 0
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var isSavingCard = false
+    @State private var addCardError: String?
 
     @StateObject private var ttsService = TTSService()
 
@@ -135,8 +139,36 @@ struct StudyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $isAddCardPresented) {
+            AddCardSheet(
+                isSaving: isSavingCard,
+                errorMessage: addCardError,
+                onSave: { chinese, pinyin, english in
+                    await addCard(chinese: chinese, pinyin: pinyin, english: english)
+                },
+                onUpdate: {
+                    addCardError = nil
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .task {
             await loadCardIfNeeded()
+        }
+        .onAppear {
+            updateAddCardAvailability()
+        }
+        .onChange(of: isLoading) { _, _ in
+            updateAddCardAvailability()
+        }
+        .onChange(of: isSavingCard) { _, _ in
+            updateAddCardAvailability()
+        }
+        .onChange(of: isAddCardPresented) { _, newValue in
+            if newValue {
+                addCardError = nil
+            }
         }
         .onChange(of: authManager.user?.id) { _, _ in
             Task {
@@ -250,9 +282,77 @@ struct StudyView: View {
         isRevealed = false
         consecutiveFailures = 0
     }
+
+    @MainActor
+    private func updateAddCardAvailability() {
+        isAddCardEnabled = !(isLoading || isSavingCard)
+    }
+
+    @MainActor
+    private func addCard(chinese: String, pinyin: String, english: String) async -> Bool {
+        guard !isSavingCard else { return false }
+
+        addCardError = nil
+
+        let normalizedChinese = chinese.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPinyin = pinyin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedEnglish = english.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedChinese.isEmpty,
+              !normalizedPinyin.isEmpty,
+              !normalizedEnglish.isEmpty else {
+            return false
+        }
+
+        let newPhraseKey = FlashcardSeed.buildPhraseKey(
+            chinese: normalizedChinese,
+            pinyin: normalizedPinyin,
+            english: normalizedEnglish
+        )
+        if cards.contains(where: {
+            FlashcardSeed.buildPhraseKey(
+                chinese: $0.chinese,
+                pinyin: $0.pinyin,
+                english: $0.english
+            ) == newPhraseKey
+        }) {
+            addCardError = "This card already exists."
+            return false
+        }
+
+        isSavingCard = true
+        defer { isSavingCard = false }
+
+        let newCard = Flashcard.newCard(
+            chinese: normalizedChinese,
+            pinyin: normalizedPinyin,
+            english: normalizedEnglish
+        )
+        let previousCards = cards
+        let previousQueue = queue
+        let updatedCards = cards + [newCard]
+
+        cards = updatedCards
+        queue = StudyQueue.buildQueue(updatedCards)
+
+        if let userId = authManager.user?.id {
+            do {
+                try await repository.insert(cards: [newCard], userId: userId)
+            } catch {
+                addCardError = "Could not save this card. Please try again."
+                cards = previousCards
+                queue = previousQueue
+                return false
+            }
+        } else {
+            LocalFlashcardStore.save(updatedCards)
+        }
+
+        return true
+    }
 }
 
 #Preview {
-    StudyView()
+    StudyView(isAddCardPresented: .constant(false), isAddCardEnabled: .constant(true))
         .environmentObject(AuthManager.shared)
 }
