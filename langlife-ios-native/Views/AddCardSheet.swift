@@ -7,6 +7,7 @@ struct AddCardSheet: View {
 
     let isSaving: Bool
     let errorMessage: String?
+    let existingPhraseKeys: Set<String>
     let onSave: (_ chinese: String, _ pinyin: String, _ english: String) async -> Bool
     let onUpdate: () -> Void
 
@@ -48,10 +49,54 @@ struct AddCardSheet: View {
             && !isTranslating
     }
 
+    private var duplicateMessage: String? {
+        guard !trimmedChinese.isEmpty,
+              !trimmedPinyin.isEmpty,
+              !trimmedEnglish.isEmpty else {
+            return nil
+        }
+
+        let phraseKey = FlashcardSeed.buildPhraseKey(
+            chinese: trimmedChinese,
+            pinyin: trimmedPinyin,
+            english: trimmedEnglish
+        )
+        return existingPhraseKeys.contains(phraseKey) ? "This card already exists." : nil
+    }
+
+    private var bannerMessage: String? {
+        errorMessage ?? duplicateMessage
+    }
+
+    private var canSave: Bool {
+        isFormValid && duplicateMessage == nil
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let bannerMessage {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                                .font(.subheadline)
+                            Text(bannerMessage)
+                                .font(.subheadline)
+                                .foregroundStyle(.red)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(.systemRed).opacity(0.12))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color(.systemRed).opacity(0.25), lineWidth: 1)
+                        )
+                    }
+
                     VStack(alignment: .leading, spacing: 10) {
                         Text("English")
                             .font(.headline)
@@ -152,11 +197,6 @@ struct AddCardSheet: View {
                             }
                     }
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
                 }
                 .padding(20)
             }
@@ -177,7 +217,7 @@ struct AddCardSheet: View {
                             }
                         }
                     }
-                    .disabled(!isFormValid || isSaving)
+                    .disabled(!canSave || isSaving)
                 }
             }
             .onAppear {
@@ -352,6 +392,7 @@ private final class TranslationQueue {
     AddCardSheet(
         isSaving: false,
         errorMessage: nil,
+        existingPhraseKeys: [],
         onSave: { _, _, _ in
             await Task.yield()
             return true

@@ -32,6 +32,7 @@ struct StudyView: View {
     @State private var signInError: String?
     @State private var pendingRating: Rating?
     @State private var pendingCardId: UUID?
+    @State private var pendingAddCard = false
 
     @StateObject private var ttsService = TTSService()
 
@@ -44,6 +45,18 @@ struct StudyView: View {
 
     private var shouldShowReviewActions: Bool {
         currentCard != nil && isRevealed
+    }
+
+    private var existingPhraseKeys: Set<String> {
+        Set(
+            cards.map {
+                FlashcardSeed.buildPhraseKey(
+                    chinese: $0.chinese,
+                    pinyin: $0.pinyin,
+                    english: $0.english
+                )
+            }
+        )
     }
 
     var body: some View {
@@ -169,6 +182,7 @@ struct StudyView: View {
             AddCardSheet(
                 isSaving: isSavingCard,
                 errorMessage: addCardError,
+                existingPhraseKeys: existingPhraseKeys,
                 onSave: { chinese, pinyin, english in
                     await addCard(chinese: chinese, pinyin: pinyin, english: english)
                 },
@@ -183,7 +197,7 @@ struct StudyView: View {
             isPresented: $isSignInOptionsPresented,
             onDismiss: {
                 if pendingSignInProvider == nil {
-                    clearPendingRating()
+                    clearPendingActions()
                 }
                 shouldStartSignIn = pendingSignInProvider != nil
                 startPendingSignInIfPossible()
@@ -216,13 +230,22 @@ struct StudyView: View {
         }
         .onChange(of: isAddCardPresented) { _, newValue in
             if newValue {
+                guard authManager.user != nil else {
+                    setPendingAddCard()
+                    isAddCardPresented = false
+                    presentSignInOptions()
+                    return
+                }
                 addCardError = nil
             }
         }
         .onChange(of: authManager.user?.id) { _, _ in
             Task {
                 await loadCardIfNeeded()
-                completePendingRatingIfNeeded()
+                completePendingActionsIfNeeded()
+            }
+            if isAddCardPresented {
+                addCardError = authManager.user == nil ? "Please sign in to add a card." : nil
             }
         }
         .onChange(of: currentCard?.id) { _, _ in
@@ -233,30 +256,59 @@ struct StudyView: View {
     private func requestRating(_ rating: Rating) {
         guard !isSigningIn else { return }
         guard authManager.user != nil else {
-            pendingRating = rating
-            pendingCardId = currentCard?.id
-            signInError = nil
-            isSignInOptionsPresented = true
+            setPendingRating(rating)
+            presentSignInOptions()
             return
         }
         handleRate(rating)
     }
 
     @MainActor
-    private func completePendingRatingIfNeeded() {
+    private func completePendingActionsIfNeeded() {
         guard authManager.user != nil else { return }
-        guard let rating = pendingRating else { return }
-        guard let pendingCardId, pendingCardId == currentCard?.id else {
+        if let rating = pendingRating {
+            guard let pendingCardId, pendingCardId == currentCard?.id else {
+                clearPendingRating()
+                return
+            }
             clearPendingRating()
+            handleRate(rating)
             return
         }
-        clearPendingRating()
-        handleRate(rating)
+
+        if pendingAddCard {
+            pendingAddCard = false
+            isAddCardPresented = true
+        }
     }
 
     private func clearPendingRating() {
         pendingRating = nil
         pendingCardId = nil
+    }
+
+    private func clearPendingActions() {
+        clearPendingRating()
+        pendingAddCard = false
+    }
+
+    private func setPendingRating(_ rating: Rating) {
+        pendingRating = rating
+        pendingCardId = currentCard?.id
+        pendingAddCard = false
+    }
+
+    private func setPendingAddCard() {
+        pendingAddCard = true
+        clearPendingRating()
+    }
+
+    private func presentSignInOptions() {
+        guard !isSigningIn else { return }
+        signInError = nil
+        pendingSignInProvider = nil
+        shouldStartSignIn = false
+        isSignInOptionsPresented = true
     }
 
     @MainActor
@@ -270,7 +322,7 @@ struct StudyView: View {
             try await authManager.signInWithApple()
         } catch {
             signInError = error.localizedDescription
-            clearPendingRating()
+            clearPendingActions()
         }
     }
 
@@ -287,11 +339,11 @@ struct StudyView: View {
         } catch {
             isSigningIn = false
             if isGoogleSignInCancelled(error) {
-                clearPendingRating()
+                clearPendingActions()
                 return
             }
             signInError = error.localizedDescription
-            clearPendingRating()
+            clearPendingActions()
         }
     }
 
@@ -477,6 +529,10 @@ struct StudyView: View {
     @MainActor
     private func addCard(chinese: String, pinyin: String, english: String) async -> Bool {
         guard !isSavingCard else { return false }
+        guard authManager.user != nil else {
+            addCardError = "Please sign in to add a card."
+            return false
+        }
 
         addCardError = nil
 
@@ -495,13 +551,7 @@ struct StudyView: View {
             pinyin: normalizedPinyin,
             english: normalizedEnglish
         )
-        if cards.contains(where: {
-            FlashcardSeed.buildPhraseKey(
-                chinese: $0.chinese,
-                pinyin: $0.pinyin,
-                english: $0.english
-            ) == newPhraseKey
-        }) {
+        if existingPhraseKeys.contains(newPhraseKey) {
             addCardError = "This card already exists."
             return false
         }
