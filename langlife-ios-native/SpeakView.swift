@@ -11,19 +11,36 @@ import SwiftUI
 
 struct SpeakView: View {
     @EnvironmentObject private var authManager: AuthManager
-    @Binding var randomRequestID: UUID
+    @Binding var generateRequestID: UUID
+    @Binding var isAddScenePresented: Bool
+    @Binding var isAddSceneEnabled: Bool
+    @Binding var isGenerateSceneEnabled: Bool
 
     @State private var scenes: [SpeakScene] = SpeakSceneSeed.defaults
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var selectedSceneId: UUID?
     @State private var selectedScene: SpeakScene?
+    @State private var isCreatingScene = false
+    @State private var addSceneError: String?
+    @State private var isGeneratingScene = false
 
     private let repository = SpeakRepository()
+    private let creationRepository = SpeakSceneCreationRepository()
+    private let generationRepository = SpeakSceneGenerationRepository()
 
     var body: some View {
         ScrollView {
             TagFlowLayout(spacing: 12, rowSpacing: 12) {
+                if isGeneratingScene {
+                    Capsule()
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .frame(minHeight: 44)
+                        .frame(minWidth: 96, maxWidth: 160, alignment: .leading)
+                        .shimmer(isActive: true, cornerRadius: 22)
+                        .clipShape(Capsule())
+                }
+
                 ForEach(scenes) { scene in
                     Button {
                         selectedSceneId = scene.id
@@ -71,6 +88,21 @@ struct SpeakView: View {
         .navigationDestination(item: $selectedScene) { scene in
             SpeakSceneDetailView(scene: scene)
         }
+        .sheet(isPresented: $isAddScenePresented) {
+            AddSceneSheet(
+                isSaving: isCreatingScene,
+                errorMessage: addSceneError,
+                isSignedIn: authManager.user != nil,
+                onSave: { prompt in
+                    await addScene(prompt: prompt)
+                },
+                onUpdate: {
+                    addSceneError = nil
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .task {
             await loadScenesIfNeeded()
         }
@@ -78,9 +110,31 @@ struct SpeakView: View {
             Task {
                 await loadScenesIfNeeded()
             }
+            updateAddSceneAvailability()
+            updateGenerateSceneAvailability()
+            if isAddScenePresented {
+                addSceneError = authManager.user == nil ? "Please sign in to add a scene." : nil
+            }
         }
-        .onChange(of: randomRequestID) { _, _ in
-            selectRandomScene()
+        .onChange(of: generateRequestID) { _, _ in
+            Task {
+                await generateScene()
+            }
+        }
+        .onAppear {
+            updateAddSceneAvailability()
+            updateGenerateSceneAvailability()
+        }
+        .onChange(of: isCreatingScene) { _, _ in
+            updateAddSceneAvailability()
+        }
+        .onChange(of: isGeneratingScene) { _, _ in
+            updateGenerateSceneAvailability()
+        }
+        .onChange(of: isAddScenePresented) { _, newValue in
+            if newValue {
+                addSceneError = authManager.user == nil ? "Please sign in to add a scene." : nil
+            }
         }
     }
 
@@ -110,23 +164,109 @@ struct SpeakView: View {
     }
 
     @MainActor
-    private func selectRandomScene() {
-        guard !scenes.isEmpty else { return }
-        if scenes.count == 1 {
-            selectedSceneId = scenes.first?.id
+    private func generateScene() async {
+        guard !isGeneratingScene else { return }
+        guard authManager.user != nil else {
+            errorMessage = "Please sign in to generate a scene."
             return
         }
 
-        let candidates = scenes.filter { $0.id != selectedSceneId }
-        if let random = candidates.randomElement() {
-            selectedSceneId = random.id
-        } else if let random = scenes.randomElement() {
-            selectedSceneId = random.id
+        isGeneratingScene = true
+        errorMessage = nil
+        defer { isGeneratingScene = false }
+
+        do {
+            let excludeIds = scenes.map { $0.id.uuidString }
+            let generated = try await generationRepository.generateScenes(
+                count: 1,
+                excludeIds: Array(excludeIds.prefix(50))
+            )
+            guard let scene = generated.first else {
+                errorMessage = "No new scenes available right now."
+                return
+            }
+            scenes = [scene] + scenes.filter { $0.id != scene.id }
+            selectedSceneId = scene.id
+        } catch {
+            errorMessage = mapGenerateSceneError(error)
         }
+    }
+
+    @MainActor
+    private func addScene(prompt: String) async -> Bool {
+        guard !isCreatingScene else { return false }
+        guard authManager.user != nil else {
+            addSceneError = "Please sign in to add a scene."
+            return false
+        }
+
+        isCreatingScene = true
+        addSceneError = nil
+        defer { isCreatingScene = false }
+
+        do {
+            let scene = try await creationRepository.createScene(prompt: prompt)
+            scenes = [scene] + scenes.filter { $0.id != scene.id }
+            return true
+        } catch {
+            addSceneError = mapAddSceneError(error)
+            return false
+        }
+    }
+
+    private func mapAddSceneError(_ error: Error) -> String {
+        guard let apiError = error as? APIClientError else {
+            return "Unable to create that scene right now."
+        }
+
+        switch apiError {
+        case .httpError(let statusCode):
+            switch statusCode {
+            case 400:
+                return "Please describe the scene in a bit more detail."
+            case 401:
+                return "Please sign in to add a scene."
+            default:
+                return "Unable to create that scene right now."
+            }
+        }
+    }
+
+    private func updateAddSceneAvailability() {
+        isAddSceneEnabled = !isCreatingScene
+    }
+
+    private func mapGenerateSceneError(_ error: Error) -> String {
+        guard let apiError = error as? APIClientError else {
+            return "Unable to generate a scene right now."
+        }
+
+        switch apiError {
+        case .httpError(let statusCode):
+            switch statusCode {
+            case 400:
+                return "Unable to generate a scene right now."
+            case 401:
+                return "Please sign in to generate a scene."
+            case 409:
+                return "No new scenes available right now."
+            default:
+                return "Unable to generate a scene right now."
+            }
+        }
+    }
+
+    private func updateGenerateSceneAvailability() {
+        isGenerateSceneEnabled = !isGeneratingScene
     }
 }
 
 #Preview {
-    SpeakView(randomRequestID: .constant(UUID()))
+    SpeakView(
+        generateRequestID: .constant(UUID()),
+        isAddScenePresented: .constant(false),
+        isAddSceneEnabled: .constant(true),
+        isGenerateSceneEnabled: .constant(true)
+    )
         .environmentObject(AuthManager.shared)
 }

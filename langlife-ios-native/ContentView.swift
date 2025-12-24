@@ -17,9 +17,12 @@ struct ContentView: View {
     @Binding var signInPresenter: UIViewController?
     @State private var selection: Tab = .study
     @State private var isSettingsPresented = false
-    @State private var randomSceneRequestID = UUID()
+    @State private var generateSceneRequestID = UUID()
     @State private var isAddCardPresented = false
     @State private var isAddCardEnabled = true
+    @State private var isAddScenePresented = false
+    @State private var isAddSceneEnabled = true
+    @State private var isGenerateSceneEnabled = true
 
     var body: some View {
         TabView(selection: $selection) {
@@ -53,22 +56,30 @@ struct ContentView: View {
             .tag(Tab.study)
 
             NavigationStack {
-                SpeakView(randomRequestID: $randomSceneRequestID)
+                SpeakView(
+                    generateRequestID: $generateSceneRequestID,
+                    isAddScenePresented: $isAddScenePresented,
+                    isAddSceneEnabled: $isAddSceneEnabled,
+                    isGenerateSceneEnabled: $isGenerateSceneEnabled
+                )
                     .navigationTitle("Speak")
                     .toolbar {
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             Button {
-                                randomSceneRequestID = UUID()
+                                generateSceneRequestID = UUID()
                             } label: {
                                 Image(systemName: "sparkles")
                             }
-                            .accessibilityLabel("Random scene")
+                            .accessibilityLabel("Generate scene")
+                            .disabled(!isGenerateSceneEnabled)
 
                             Button {
+                                isAddScenePresented = true
                             } label: {
                                 Image(systemName: "plus")
                             }
-                            .accessibilityLabel("Add")
+                            .accessibilityLabel("Add scene")
+                            .disabled(!isAddSceneEnabled)
 
                             Button {
                                 isSettingsPresented = true
