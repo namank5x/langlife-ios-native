@@ -8,7 +8,6 @@ struct SpeakRepository {
             .select("id, title, description, tags, level")
             .eq("user_id", value: userId.uuidString)
             .order("created_at", ascending: false)
-            .limit(12)
             .execute()
             .value
     }
