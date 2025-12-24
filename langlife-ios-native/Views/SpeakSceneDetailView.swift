@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct SpeakSceneDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var viewModel = SpeakSceneDetailViewModel()
     @StateObject private var ttsService = TTSService()
     @StateObject private var speechService = SpeechInputService()
@@ -13,7 +14,10 @@ struct SpeakSceneDetailView: View {
     @State private var scrollViewHeight: CGFloat = 0
     @State private var contentMetrics: ScrollContentMetrics = .zero
     @State private var isNearBottom = true
+    @State private var isMicPulseExpanded = false
     private let scrollBottomSpacerHeight: CGFloat = 140
+    private let micButtonSize = CGSize(width: 132, height: 64)
+    private let micCornerRadius: CGFloat = 22
     let scene: SpeakScene
 
     var body: some View {
@@ -56,6 +60,30 @@ struct SpeakSceneDetailView: View {
                 ttsService.stop()
                 await ttsService.play(text: trimmed)
             }
+        }
+        .onAppear {
+            updateMicPulseState()
+        }
+        .onChange(of: speechService.isRecording) { _, _ in
+            updateMicPulseState()
+        }
+        .onChange(of: viewModel.activeSpeechKey) { _, _ in
+            updateMicPulseState()
+        }
+        .onChange(of: viewModel.turns) { _, _ in
+            updateMicPulseState()
+        }
+        .onChange(of: viewModel.isLoadingTurn) { _, _ in
+            updateMicPulseState()
+        }
+        .onChange(of: ttsService.isPlaying) { _, _ in
+            updateMicPulseState()
+        }
+        .onChange(of: ttsService.isLoading) { _, _ in
+            updateMicPulseState()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            updateMicPulseState()
         }
         .sheet(isPresented: $isOutlinePresented) {
             NavigationStack {
@@ -208,19 +236,43 @@ struct SpeakSceneDetailView: View {
                 Spacer()
 
                 Button {
-                    Task {
-                        await handleMicTap()
+                        Task {
+                            await handleMicTap()
+                        }
+                    } label: {
+                        ZStack {
+                            if shouldPulseMic {
+                                RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                                    .fill(AppColors.micPulseHalo.opacity(reduceMotion ? 0.3 : (isMicPulseExpanded ? 0.32 : 0.2)))
+                                    .frame(width: micButtonSize.width, height: micButtonSize.height)
+                                    .scaleEffect(reduceMotion ? 1.1 : (isMicPulseExpanded ? 1.18 : 1.06))
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+
+                                RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                                    .stroke(AppColors.micPulseHalo.opacity(reduceMotion ? 0.7 : 0.85), lineWidth: 5)
+                                    .frame(width: micButtonSize.width, height: micButtonSize.height)
+                                    .scaleEffect(reduceMotion ? 1.1 : (isMicPulseExpanded ? 1.18 : 1.06))
+                                    .opacity(reduceMotion ? 0.85 : (isMicPulseExpanded ? 0.2 : 0.7))
+                                    .shadow(color: AppColors.micPulseHalo.opacity(0.65), radius: 14, x: 0, y: 0)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+
+                            Image(systemName: speechService.isRecording ? "stop.fill" : "mic.fill")
+                                .font(.title2)
+                                .foregroundStyle(AppColors.onAccent)
+                                .frame(width: micButtonSize.width, height: micButtonSize.height)
+                                .background(AppColors.accent, in: RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                                        .stroke(AppColors.onAccent.opacity(0.25), lineWidth: 1)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+                        }
                     }
-                } label: {
-                    Image(systemName: speechService.isRecording ? "stop.fill" : "mic.fill")
-                        .font(.title2)
-                        .foregroundStyle(AppColors.onAccent)
-                        .frame(width: 132, height: 64)
-                        .background(AppColors.accent, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Record")
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Record")
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
@@ -291,6 +343,37 @@ struct SpeakSceneDetailView: View {
         }
         let distanceFromBottom = contentMetrics.height + contentMetrics.minY - scrollViewHeight
         isNearBottom = distanceFromBottom <= threshold
+    }
+
+    private var shouldPulseMic: Bool {
+        guard let target = viewModel.currentPracticeTarget else { return false }
+        if let attempt = viewModel.speechAttempts[target.key],
+           attempt.status == .passed {
+            return false
+        }
+        guard !ttsService.isPlaying else { return false }
+        guard !ttsService.isLoading else { return false }
+        guard !speechService.isRecording else { return false }
+        guard viewModel.activeSpeechKey == nil else { return false }
+        guard !viewModel.isLoadingTurn else { return false }
+        return true
+    }
+
+    private func updateMicPulseState() {
+        guard shouldPulseMic else {
+            isMicPulseExpanded = false
+            return
+        }
+
+        guard !reduceMotion else {
+            isMicPulseExpanded = false
+            return
+        }
+
+        guard !isMicPulseExpanded else { return }
+        withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+            isMicPulseExpanded = true
+        }
     }
 }
 
