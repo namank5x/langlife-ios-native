@@ -1,0 +1,8 @@
+// Release/production configuration
+// TODO: Replace these with production values.
+SUPABASE_URL = https://vepkacawpdjdpibdhgvd.supabase.co
+SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZlcGthY2F3cGRqZHBpYmRoZ3ZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyMjIwNjgsImV4cCI6MjA4MTc5ODA2OH0.IE_nKX5B5dDOkaP3_lWmVkfSjm5uP8rg5mOHdXDquS0
+API_BASE_URL = https://www.langlife.app
+GOOGLE_IOS_CLIENT_ID = 1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4.apps.googleusercontent.com
+GOOGLE_SERVER_CLIENT_ID = 1075777048946-9do35ss4b3amla5v0t29danllgimvl7i.apps.googleusercontent.com
+GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4

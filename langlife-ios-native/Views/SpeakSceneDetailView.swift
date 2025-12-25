@@ -143,8 +143,14 @@ struct SpeakSceneDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if viewModel.isLoadingOutline && viewModel.outline == nil {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 120)
+                    centeredLoadingBlock(
+                        label: "Loading outline",
+                        phrases: [
+                            "Preparing the scene...",
+                            "Building the outline...",
+                            "Setting up your practice..."
+                        ]
+                    )
                 } else if let outline = viewModel.outline {
                     OutlinePanel(outline: outline)
                 } else if let error = viewModel.outlineError {
@@ -164,6 +170,16 @@ struct SpeakSceneDetailView: View {
         }
     }
 
+    private func centeredLoadingBlock(label: String, phrases: [String]) -> some View {
+        VStack {
+            Spacer(minLength: 0)
+            RotatingLoadingText(phrases: phrases)
+                .accessibilityLabel(label)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 120)
+    }
+
     private var sceneContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -174,8 +190,14 @@ struct SpeakSceneDetailView: View {
                         }
                     }
                     if viewModel.isLoadingOutline && viewModel.outline == nil {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, minHeight: 120)
+                        centeredLoadingBlock(
+                            label: "Loading scene",
+                            phrases: [
+                                "Preparing the scene...",
+                                "Building the outline...",
+                                "Setting up your practice..."
+                            ]
+                        )
                     } else if viewModel.outline == nil, let error = viewModel.outlineError {
                         ErrorCard(message: error) {
                             Task {
@@ -217,6 +239,7 @@ struct SpeakSceneDetailView: View {
                             },
                             bottomSpacerHeight: scrollBottomSpacerHeight
                         )
+
                     }
                 }
                 .padding(16)
@@ -580,8 +603,15 @@ private struct ConversationPanel: View {
             }
 
             if isLoadingTurn {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
+                RotatingLoadingText(
+                    phrases: [
+                        "Loading next turn...",
+                        "Fetching the next line...",
+                        "Almost ready..."
+                    ]
+                )
+                .accessibilityLabel("Loading next turn")
+                .padding(.top, 8)
             }
 
             if let turnError {
