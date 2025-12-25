@@ -11,12 +11,14 @@ import SwiftUI
 @main
 struct langlife_ios_nativeApp: App {
     @StateObject private var authManager = AuthManager.shared
+    @StateObject private var cardStore = FlashcardStore()
     @State private var signInPresenter: UIViewController?
 
     var body: some Scene {
         WindowGroup {
             ContentView(signInPresenter: $signInPresenter)
                 .environmentObject(authManager)
+                .environmentObject(cardStore)
                 .tint(AppColors.accent)
                 .background(
                     SignInPresenter(presenter: $signInPresenter)

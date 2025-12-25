@@ -110,6 +110,20 @@ struct FlashcardReviewUpdate: Encodable {
     }
 }
 
+struct FlashcardContentUpdate: Encodable {
+    let chinese: String
+    let pinyin: String
+    let english: String
+    let phraseKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case chinese
+        case pinyin
+        case english
+        case phraseKey = "phrase_key"
+    }
+}
+
 extension Flashcard {
     static func initial(from seed: FlashcardSeed) -> Flashcard {
         Flashcard(

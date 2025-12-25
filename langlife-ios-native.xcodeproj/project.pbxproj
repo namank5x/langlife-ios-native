@@ -13,8 +13,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B6C0A1B2C3D4E5F607182940 /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = "langlife-ios-native/Config/Debug.xcconfig"; sourceTree = SOURCE_ROOT; };
-		B6C0A1B2C3D4E5F607182941 /* Release.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = "langlife-ios-native/Config/Release.xcconfig"; sourceTree = SOURCE_ROOT; };
+		B6C0A1B2C3D4E5F607182940 /* langlife-ios-native/Config/Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = "langlife-ios-native/Config/Debug.xcconfig"; sourceTree = SOURCE_ROOT; };
+		B6C0A1B2C3D4E5F607182941 /* langlife-ios-native/Config/Release.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = "langlife-ios-native/Config/Release.xcconfig"; sourceTree = SOURCE_ROOT; };
 		EDA0D3E82EF84629002AA08D /* langlife-ios-native.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "langlife-ios-native.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -45,6 +45,7 @@
 			children = (
 				EDA0D3EA2EF84629002AA08D /* langlife-ios-native */,
 				EDA0D3E92EF84629002AA08D /* Products */,
+				EDA0D7372EFD0EA7002AA08D /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -54,6 +55,15 @@
 				EDA0D3E82EF84629002AA08D /* langlife-ios-native.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		EDA0D7372EFD0EA7002AA08D /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				B6C0A1B2C3D4E5F607182940 /* langlife-ios-native/Config/Debug.xcconfig */,
+				B6C0A1B2C3D4E5F607182941 /* langlife-ios-native/Config/Release.xcconfig */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -264,7 +274,7 @@
 		};
 		EDA0D3F42EF8462A002AA08D /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B6C0A1B2C3D4E5F607182940 /* Debug.xcconfig */;
+			baseConfigurationReference = B6C0A1B2C3D4E5F607182940 /* langlife-ios-native/Config/Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -299,7 +309,7 @@
 		};
 		EDA0D3F52EF8462A002AA08D /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B6C0A1B2C3D4E5F607182941 /* Release.xcconfig */;
+			baseConfigurationReference = B6C0A1B2C3D4E5F607182941 /* langlife-ios-native/Config/Release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

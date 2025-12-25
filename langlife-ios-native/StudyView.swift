@@ -11,17 +11,17 @@ import UIKit
 
 struct StudyView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var cardStore: FlashcardStore
     @Environment(\.scenePhase) private var scenePhase
     @Binding var signInPresenter: UIViewController?
     @Binding var isAddCardPresented: Bool
     @Binding var isAddCardEnabled: Bool
+    @Binding var isManageCardsPresented: Bool
 
-    @State private var cards: [Flashcard] = []
     @State private var queue: [QueuedCard] = []
     @State private var isRevealed = false
     @State private var consecutiveFailures = 0
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var reviewErrorMessage: String?
     @State private var isSavingCard = false
     @State private var addCardError: String?
     @State private var localSignInPresenter: UIViewController?
@@ -33,10 +33,12 @@ struct StudyView: View {
     @State private var pendingRating: Rating?
     @State private var pendingCardId: UUID?
     @State private var pendingAddCard = false
+    @State private var pendingManageCards = false
+    @State private var cardsCountSnapshot = 0
+    @State private var queueUserId: UUID?
 
     @StateObject private var ttsService = TTSService()
 
-    private let repository = FlashcardRepository()
     private let actionButtonHeight: CGFloat = 48
 
     private var currentCard: Flashcard? {
@@ -47,9 +49,13 @@ struct StudyView: View {
         currentCard != nil && isRevealed
     }
 
+    private var cards: [Flashcard] {
+        cardStore.cards
+    }
+
     private var existingPhraseKeys: Set<String> {
         Set(
-            cards.map {
+            cardStore.cards.map {
                 FlashcardSeed.buildPhraseKey(
                     chinese: $0.chinese,
                     pinyin: $0.pinyin,
@@ -63,7 +69,7 @@ struct StudyView: View {
         VStack {
             Spacer(minLength: 24)
 
-            if isLoading {
+            if cardStore.isLoading {
                 ProgressView()
             } else if let card = currentCard {
                 VStack(spacing: 16) {
@@ -108,7 +114,7 @@ struct StudyView: View {
                     .neutralProminentButton()
                     .controlSize(.large)
                     .accessibilityLabel("Play pronunciation")
-                    .disabled(isLoading || ttsService.isLoading)
+                    .disabled(cardStore.isLoading || ttsService.isLoading)
 
                     if shouldShowReviewActions {
                         HStack(spacing: 12) {
@@ -154,8 +160,15 @@ struct StudyView: View {
                 .padding(.horizontal, 20)
             }
 
-            if let errorMessage {
+            if let errorMessage = cardStore.errorMessage {
                 Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .padding(.top, 12)
+            }
+
+            if let reviewErrorMessage {
+                Text(reviewErrorMessage)
                     .font(.footnote)
                     .foregroundStyle(.red)
                     .padding(.top, 12)
@@ -179,17 +192,19 @@ struct StudyView: View {
                 .opacity(0.01)
         )
         .sheet(isPresented: $isAddCardPresented) {
-            AddCardSheet(
-                isSaving: isSavingCard,
-                errorMessage: addCardError,
-                existingPhraseKeys: existingPhraseKeys,
-                onSave: { chinese, pinyin, english in
-                    await addCard(chinese: chinese, pinyin: pinyin, english: english)
-                },
-                onUpdate: {
-                    addCardError = nil
-                }
-            )
+            NavigationStack {
+                AddCardSheet(
+                    isSaving: isSavingCard,
+                    errorMessage: addCardError,
+                    existingPhraseKeys: existingPhraseKeys,
+                    onSave: { chinese, pinyin, english in
+                        await addCard(chinese: chinese, pinyin: pinyin, english: english)
+                    },
+                    onUpdate: {
+                        addCardError = nil
+                    }
+                )
+            }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -213,6 +228,9 @@ struct StudyView: View {
                 .presentationDragIndicator(.visible)
             }
         )
+        .navigationDestination(isPresented: $isManageCardsPresented) {
+            ManageCardsView()
+        }
         .task {
             await loadCardIfNeeded()
         }
@@ -222,7 +240,7 @@ struct StudyView: View {
         .onChange(of: scenePhase) { _ in
             startPendingSignInIfPossible()
         }
-        .onChange(of: isLoading) { _, _ in
+        .onChange(of: cardStore.isLoading) { _, _ in
             updateAddCardAvailability()
         }
         .onChange(of: isSavingCard) { _, _ in
@@ -239,6 +257,16 @@ struct StudyView: View {
                 addCardError = nil
             }
         }
+        .onChange(of: isManageCardsPresented) { _, newValue in
+            if newValue {
+                guard authManager.user != nil else {
+                    setPendingManageCards()
+                    isManageCardsPresented = false
+                    presentSignInOptions()
+                    return
+                }
+            }
+        }
         .onChange(of: authManager.user?.id) { _, _ in
             Task {
                 await loadCardIfNeeded()
@@ -247,6 +275,9 @@ struct StudyView: View {
             if isAddCardPresented {
                 addCardError = authManager.user == nil ? "Please sign in to add a card." : nil
             }
+        }
+        .onChange(of: cardStore.cards) { _, newValue in
+            syncQueue(with: newValue)
         }
         .onChange(of: currentCard?.id) { _, _ in
             isRevealed = false
@@ -280,6 +311,11 @@ struct StudyView: View {
             pendingAddCard = false
             isAddCardPresented = true
         }
+
+        if pendingManageCards {
+            pendingManageCards = false
+            isManageCardsPresented = true
+        }
     }
 
     private func clearPendingRating() {
@@ -290,6 +326,7 @@ struct StudyView: View {
     private func clearPendingActions() {
         clearPendingRating()
         pendingAddCard = false
+        pendingManageCards = false
     }
 
     private func setPendingRating(_ rating: Rating) {
@@ -300,6 +337,13 @@ struct StudyView: View {
 
     private func setPendingAddCard() {
         pendingAddCard = true
+        pendingManageCards = false
+        clearPendingRating()
+    }
+
+    private func setPendingManageCards() {
+        pendingManageCards = true
+        pendingAddCard = false
         clearPendingRating()
     }
 
@@ -420,66 +464,46 @@ struct StudyView: View {
 
     @MainActor
     private func loadCardIfNeeded() async {
-        guard !isLoading else { return }
-
-        isLoading = true
-        defer { isLoading = false }
-        errorMessage = nil
-
-        if let userId = authManager.user?.id {
-            do {
-                let fetchedCards = try await repository.fetchCards(for: userId)
-                if fetchedCards.isEmpty {
-                    let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
-                    try await repository.insert(cards: seeded, userId: userId)
-                    LocalFlashcardStore.clear()
-                    cards = seeded
-                } else {
-                    cards = fetchedCards
-                }
-                queue = StudyQueue.buildQueue(cards)
-                isRevealed = false
-                consecutiveFailures = 0
-            } catch {
-                errorMessage = "Could not load cards. Showing local data instead."
-                loadFromLocalFallback()
-            }
-            return
+        await cardStore.loadIfNeeded(for: authManager.user?.id)
+        if queueUserId != authManager.user?.id {
+            rebuildQueue(from: cardStore.cards)
+        } else if cardsCountSnapshot == 0 {
+            rebuildQueue(from: cardStore.cards)
+        } else {
+            syncQueue(with: cardStore.cards)
         }
-
-        loadFromLocalFallback()
-    }
-
-    @MainActor
-    private func loadFromLocalFallback() {
-        if let local = LocalFlashcardStore.load(), !local.isEmpty {
-            cards = local
-            queue = StudyQueue.buildQueue(cards)
-            isRevealed = false
-            consecutiveFailures = 0
-            return
-        }
-
-        let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
-        LocalFlashcardStore.save(seeded)
-        cards = seeded
-        queue = StudyQueue.buildQueue(cards)
-        isRevealed = false
-        consecutiveFailures = 0
     }
 
     @MainActor
     private func persistReview(_ updatedCard: Flashcard) async {
-        if let userId = authManager.user?.id {
-            do {
-                try await repository.update(card: updatedCard, userId: userId)
-            } catch {
-                errorMessage = "Could not save progress. Please try again."
-            }
+        do {
+            try await cardStore.persistReview(updatedCard, userId: authManager.user?.id)
+        } catch {
+            reviewErrorMessage = "Could not save progress. Please try again."
+        }
+    }
+
+    @MainActor
+    private func rebuildQueue(from cards: [Flashcard]) {
+        queue = StudyQueue.buildQueue(cards)
+        isRevealed = false
+        consecutiveFailures = 0
+        cardsCountSnapshot = cards.count
+        queueUserId = authManager.user?.id
+    }
+
+    @MainActor
+    private func syncQueue(with cards: [Flashcard]) {
+        if cards.count != cardsCountSnapshot {
+            rebuildQueue(from: cards)
             return
         }
 
-        LocalFlashcardStore.save(cards)
+        let cardMap = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
+        queue = queue.compactMap { queued in
+            guard let updatedCard = cardMap[queued.card.id] else { return nil }
+            return QueuedCard(card: updatedCard, priority: queued.priority, category: queued.category)
+        }
     }
 
     private func revealAnswerIfNeeded() {
@@ -491,7 +515,7 @@ struct StudyView: View {
         guard let card = currentCard else { return }
 
         let updatedCard = FSRS.reviewCard(card, rating: rating)
-        cards = cards.map { $0.id == updatedCard.id ? updatedCard : $0 }
+        cardStore.updateCard(updatedCard)
 
         if rating == .again {
             let position = StudyQueue.getReinsertPosition(consecutiveFailures: consecutiveFailures + 1)
@@ -507,6 +531,7 @@ struct StudyView: View {
         }
 
         isRevealed = false
+        reviewErrorMessage = nil
         Task {
             await persistReview(updatedCard)
         }
@@ -523,7 +548,7 @@ struct StudyView: View {
 
     @MainActor
     private func updateAddCardAvailability() {
-        isAddCardEnabled = !(isLoading || isSavingCard)
+        isAddCardEnabled = !(cardStore.isLoading || isSavingCard)
     }
 
     @MainActor
@@ -558,33 +583,20 @@ struct StudyView: View {
 
         isSavingCard = true
         defer { isSavingCard = false }
-
-        let newCard = Flashcard.newCard(
-            chinese: normalizedChinese,
-            pinyin: normalizedPinyin,
-            english: normalizedEnglish
-        )
-        let previousCards = cards
-        let previousQueue = queue
-        let updatedCards = cards + [newCard]
-
-        cards = updatedCards
-        queue = StudyQueue.buildQueue(updatedCards)
-
-        if let userId = authManager.user?.id {
-            do {
-                try await repository.insert(cards: [newCard], userId: userId)
-            } catch {
-                addCardError = "Could not save this card. Please try again."
-                cards = previousCards
-                queue = previousQueue
-                return false
-            }
-        } else {
-            LocalFlashcardStore.save(updatedCards)
+        guard let userId = authManager.user?.id else { return false }
+        do {
+            _ = try await cardStore.addCard(
+                chinese: normalizedChinese,
+                pinyin: normalizedPinyin,
+                english: normalizedEnglish,
+                userId: userId
+            )
+            rebuildQueue(from: cardStore.cards)
+            return true
+        } catch {
+            addCardError = "Could not save this card. Please try again."
+            return false
         }
-
-        return true
     }
 }
 
@@ -592,7 +604,9 @@ struct StudyView: View {
     StudyView(
         signInPresenter: .constant(nil),
         isAddCardPresented: .constant(false),
-        isAddCardEnabled: .constant(true)
+        isAddCardEnabled: .constant(true),
+        isManageCardsPresented: .constant(false)
     )
         .environmentObject(AuthManager.shared)
+        .environmentObject(FlashcardStore())
 }

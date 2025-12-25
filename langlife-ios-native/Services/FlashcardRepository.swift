@@ -31,4 +31,38 @@ struct FlashcardRepository {
             .eq("user_id", value: userId.uuidString)
             .execute()
     }
+
+    func updateContent(
+        cardId: UUID,
+        userId: UUID,
+        chinese: String,
+        pinyin: String,
+        english: String
+    ) async throws {
+        let payload = FlashcardContentUpdate(
+            chinese: chinese,
+            pinyin: pinyin,
+            english: english,
+            phraseKey: FlashcardSeed.buildPhraseKey(
+                chinese: chinese,
+                pinyin: pinyin,
+                english: english
+            )
+        )
+        _ = try await supabase
+            .from("flashcards")
+            .update(payload)
+            .eq("id", value: cardId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+    }
+
+    func delete(cardId: UUID, userId: UUID) async throws {
+        _ = try await supabase
+            .from("flashcards")
+            .delete()
+            .eq("id", value: cardId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+    }
 }

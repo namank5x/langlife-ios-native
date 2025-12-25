@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var generateSceneRequestID = UUID()
     @State private var isAddCardPresented = false
     @State private var isAddCardEnabled = true
+    @State private var isManageCardsPresented = false
     @State private var isAddScenePresented = false
     @State private var isAddSceneEnabled = true
     @State private var isGenerateSceneEnabled = true
@@ -30,7 +31,8 @@ struct ContentView: View {
                 StudyView(
                     signInPresenter: $signInPresenter,
                     isAddCardPresented: $isAddCardPresented,
-                    isAddCardEnabled: $isAddCardEnabled
+                    isAddCardEnabled: $isAddCardEnabled,
+                    isManageCardsPresented: $isManageCardsPresented
                 )
                     .toolbar {
                         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -41,6 +43,13 @@ struct ContentView: View {
                             }
                             .accessibilityLabel("Add card")
                             .disabled(!isAddCardEnabled)
+
+                            Button {
+                                isManageCardsPresented = true
+                            } label: {
+                                Image(systemName: "list.bullet")
+                            }
+                            .accessibilityLabel("Cards")
 
                             Button {
                                 isSettingsPresented = true
@@ -106,4 +115,5 @@ struct ContentView: View {
 #Preview {
     ContentView(signInPresenter: .constant(nil))
         .environmentObject(AuthManager.shared)
+        .environmentObject(FlashcardStore())
 }
