@@ -15,6 +15,7 @@ struct Flashcard: Identifiable, Codable, Hashable {
     var example: String?
     var examplePinyin: String?
     var exampleEnglish: String?
+    var createdAt: Date?
 
     var state: CardState
     var stability: Double
@@ -32,6 +33,7 @@ struct Flashcard: Identifiable, Codable, Hashable {
         case example
         case examplePinyin = "example_pinyin"
         case exampleEnglish = "example_english"
+        case createdAt = "created_at"
         case state
         case stability
         case difficulty
@@ -134,6 +136,7 @@ extension Flashcard {
             example: seed.example,
             examplePinyin: seed.examplePinyin,
             exampleEnglish: seed.exampleEnglish,
+            createdAt: Date(),
             state: .new,
             stability: 0,
             difficulty: 0.3,
@@ -153,6 +156,7 @@ extension Flashcard {
             example: nil,
             examplePinyin: nil,
             exampleEnglish: nil,
+            createdAt: Date(),
             state: .new,
             stability: 0,
             difficulty: 0.3,

@@ -12,6 +12,7 @@ import UIKit
 
 struct SpeakView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var cardStore: FlashcardStore
     @Environment(\.scenePhase) private var scenePhase
     @Binding var signInPresenter: UIViewController?
     @Binding var generateRequestID: UUID
@@ -432,6 +433,7 @@ struct SpeakView: View {
             }
             scenes = [scene] + scenes.filter { $0.id != scene.id }
             selectedSceneId = scene.id
+            await cardStore.refresh(for: authManager.user?.id)
         } catch {
             errorMessage = mapGenerateSceneError(error)
         }
@@ -452,6 +454,7 @@ struct SpeakView: View {
         do {
             let scene = try await creationRepository.createScene(prompt: prompt)
             scenes = [scene] + scenes.filter { $0.id != scene.id }
+            await cardStore.refresh(for: authManager.user?.id)
             return true
         } catch {
             addSceneError = mapAddSceneError(error)
@@ -515,4 +518,5 @@ struct SpeakView: View {
         isGenerateSceneEnabled: .constant(true)
     )
         .environmentObject(AuthManager.shared)
+        .environmentObject(FlashcardStore())
 }

@@ -82,6 +82,7 @@ enum FSRS {
             example: card.example,
             examplePinyin: card.examplePinyin,
             exampleEnglish: card.exampleEnglish,
+            createdAt: card.createdAt,
             state: newState,
             stability: newStability,
             difficulty: newDifficulty,

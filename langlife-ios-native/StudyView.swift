@@ -69,7 +69,7 @@ struct StudyView: View {
         VStack {
             Spacer(minLength: 24)
 
-            if cardStore.isLoading {
+            if cardStore.isLoading && cardStore.cards.isEmpty {
                 ProgressView()
             } else if let card = currentCard {
                 VStack(spacing: 16) {

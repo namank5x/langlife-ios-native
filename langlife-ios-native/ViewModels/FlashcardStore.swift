@@ -9,16 +9,35 @@ final class FlashcardStore: ObservableObject {
 
     private let repository = FlashcardRepository()
     private var lastLoadedUserId: UUID?
+    private var isRefreshing = false
+    private let syncTTL: TimeInterval = 10 * 60
 
     func loadIfNeeded(for userId: UUID?) async {
-        guard !isLoading else { return }
-        if lastLoadedUserId == userId, !cards.isEmpty { return }
-        await load(for: userId)
+        if isRefreshing, lastLoadedUserId == userId { return }
+        if let userId {
+            if lastLoadedUserId != userId || cards.isEmpty {
+                cards = []
+                loadCachedCards(for: userId)
+                lastLoadedUserId = userId
+            }
+            await refreshIfStale(for: userId)
+            return
+        }
+
+        errorMessage = nil
+        clearUserCacheIfNeeded()
+        loadFromLocalFallback()
     }
 
     func refresh(for userId: UUID?) async {
-        guard !isLoading else { return }
-        await load(for: userId, force: true)
+        if isRefreshing, lastLoadedUserId == userId { return }
+        guard let userId else {
+            errorMessage = nil
+            loadFromLocalFallback()
+            return
+        }
+
+        await refreshIfStale(for: userId, force: true)
     }
 
     func addCard(
@@ -37,6 +56,8 @@ final class FlashcardStore: ObservableObject {
 
         do {
             try await repository.insert(cards: [newCard], userId: userId)
+            LocalFlashcardStore.save(cards, userId: userId)
+            touchSyncState(userId: userId)
         } catch {
             cards = previousCards
             throw error
@@ -65,6 +86,7 @@ final class FlashcardStore: ObservableObject {
             example: previousCard.example,
             examplePinyin: previousCard.examplePinyin,
             exampleEnglish: previousCard.exampleEnglish,
+            createdAt: previousCard.createdAt,
             state: previousCard.state,
             stability: previousCard.stability,
             difficulty: previousCard.difficulty,
@@ -84,6 +106,8 @@ final class FlashcardStore: ObservableObject {
                 pinyin: pinyin,
                 english: english
             )
+            LocalFlashcardStore.save(cards, userId: userId)
+            touchSyncState(userId: userId)
         } catch {
             cards[index] = previousCard
             throw error
@@ -102,6 +126,8 @@ final class FlashcardStore: ObservableObject {
 
         do {
             try await repository.delete(cardId: cardId, userId: userId)
+            LocalFlashcardStore.save(cards, userId: userId)
+            touchSyncState(userId: userId)
         } catch {
             cards = previousCards
             throw error
@@ -114,53 +140,133 @@ final class FlashcardStore: ObservableObject {
 
     func persistReview(_ updatedCard: Flashcard, userId: UUID?) async throws {
         if let userId {
-            try await repository.update(card: updatedCard, userId: userId)
-            return
-        }
-
-        LocalFlashcardStore.save(cards)
-    }
-
-    private func load(for userId: UUID?, force: Bool = false) async {
-        guard !isLoading else { return }
-        if !force, lastLoadedUserId == userId, !cards.isEmpty { return }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        errorMessage = nil
-        lastLoadedUserId = userId
-
-        if let userId {
             do {
-                let fetchedCards = try await repository.fetchCards(for: userId)
-                if fetchedCards.isEmpty {
-                    let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
-                    try await repository.insert(cards: seeded, userId: userId)
-                    LocalFlashcardStore.clear()
-                    cards = seeded
-                } else {
-                    cards = fetchedCards
-                }
+                try await repository.update(card: updatedCard, userId: userId)
+                LocalFlashcardStore.save(cards, userId: userId)
+                touchSyncState(userId: userId)
             } catch {
-                errorMessage = "Could not load cards. Showing local data instead."
-                loadFromLocalFallback()
+                LocalFlashcardStore.save(cards, userId: userId)
+                throw error
             }
             return
         }
 
-        loadFromLocalFallback()
+        LocalFlashcardStore.save(cards, userId: nil)
+    }
+
+    private func refreshIfStale(for userId: UUID, force: Bool = false) async {
+        let syncState = LocalFlashcardStore.loadSyncState(userId: userId)
+        if !force, let syncState {
+            let age = Date().timeIntervalSince(syncState.lastSyncAt)
+            if age < syncTTL { return }
+        }
+
+        await refreshFromServer(for: userId, syncState: syncState)
+    }
+
+    private func refreshFromServer(for userId: UUID, syncState: FlashcardSyncState?) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        isLoading = cards.isEmpty
+        defer {
+            isRefreshing = false
+            isLoading = false
+        }
+
+        errorMessage = nil
+        lastLoadedUserId = userId
+
+        do {
+            if let lastServerCreatedAt = syncState?.lastServerCreatedAt {
+                let newCards = try await repository.fetchCardsCreated(
+                    after: lastServerCreatedAt,
+                    userId: userId
+                )
+                guard lastLoadedUserId == userId else { return }
+                if !newCards.isEmpty {
+                    mergeNewCards(newCards)
+                    LocalFlashcardStore.save(cards, userId: userId)
+                }
+                let maxCreatedAt = [lastServerCreatedAt, newCards.compactMap(\.createdAt).max()]
+                    .compactMap { $0 }
+                    .max()
+                updateSyncState(userId: userId, lastServerCreatedAt: maxCreatedAt)
+                return
+            }
+
+            let fetchedCards = try await repository.fetchCards(for: userId)
+            guard lastLoadedUserId == userId else { return }
+            if fetchedCards.isEmpty {
+                let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
+                try await repository.insert(cards: seeded, userId: userId)
+                cards = seeded
+            } else {
+                cards = fetchedCards
+            }
+            LocalFlashcardStore.save(cards, userId: userId)
+            let maxCreatedAt = cards.compactMap(\.createdAt).max()
+            updateSyncState(userId: userId, lastServerCreatedAt: maxCreatedAt)
+        } catch {
+            errorMessage = "Could not load cards. Showing local data instead."
+            if cards.isEmpty {
+                loadCachedCards(for: userId)
+                if cards.isEmpty {
+                    loadFromLocalFallback()
+                }
+            }
+        }
+    }
+
+    private func loadCachedCards(for userId: UUID) {
+        if let local = LocalFlashcardStore.load(userId: userId), !local.isEmpty {
+            cards = local
+        }
     }
 
     private func loadFromLocalFallback() {
-        if let local = LocalFlashcardStore.load(), !local.isEmpty {
+        if let local = LocalFlashcardStore.load(userId: nil), !local.isEmpty {
             cards = local
             return
         }
 
         let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
-        LocalFlashcardStore.save(seeded)
+        LocalFlashcardStore.save(seeded, userId: nil)
         cards = seeded
+    }
+
+    private func mergeNewCards(_ newCards: [Flashcard]) {
+        guard !newCards.isEmpty else { return }
+        var updatedCards = cards
+        var indexById = Dictionary(uniqueKeysWithValues: updatedCards.enumerated().map { ($0.element.id, $0.offset) })
+        for card in newCards {
+            if let index = indexById[card.id] {
+                updatedCards[index] = card
+            } else {
+                indexById[card.id] = updatedCards.count
+                updatedCards.append(card)
+            }
+        }
+        cards = updatedCards
+    }
+
+    private func updateSyncState(userId: UUID, lastServerCreatedAt: Date?) {
+        let state = FlashcardSyncState(
+            lastSyncAt: Date(),
+            lastServerCreatedAt: lastServerCreatedAt
+        )
+        LocalFlashcardStore.saveSyncState(state, userId: userId)
+    }
+
+    private func touchSyncState(userId: UUID) {
+        let lastServerCreatedAt = LocalFlashcardStore.loadSyncState(userId: userId)?.lastServerCreatedAt
+        updateSyncState(userId: userId, lastServerCreatedAt: lastServerCreatedAt)
+    }
+
+    private func clearUserCacheIfNeeded() {
+        guard let loadedUserId = lastLoadedUserId else { return }
+        LocalFlashcardStore.clear(userId: loadedUserId)
+        lastLoadedUserId = nil
+        cards = []
     }
 }
 

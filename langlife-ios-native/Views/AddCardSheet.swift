@@ -9,9 +9,9 @@ struct AddCardSheet: View {
     let isDeleting: Bool
     let errorMessage: String?
     let existingPhraseKeys: Set<String>
-    let onSave: (_ chinese: String, _ pinyin: String, _ english: String) async -> Bool
+    let onSave: @MainActor (_ chinese: String, _ pinyin: String, _ english: String) async -> Bool
     let onUpdate: () -> Void
-    let onDelete: (() async -> Bool)?
+    let onDelete: (@MainActor () async -> Bool)?
     let mode: Mode
 
     @State private var chinese = ""
@@ -38,9 +38,9 @@ struct AddCardSheet: View {
         isDeleting: Bool = false,
         errorMessage: String?,
         existingPhraseKeys: Set<String>,
-        onSave: @escaping (_ chinese: String, _ pinyin: String, _ english: String) async -> Bool,
+        onSave: @escaping @MainActor (_ chinese: String, _ pinyin: String, _ english: String) async -> Bool,
         onUpdate: @escaping () -> Void,
-        onDelete: (() async -> Bool)? = nil,
+        onDelete: (@MainActor () async -> Bool)? = nil,
         mode: Mode = .create,
         initialChinese: String = "",
         initialPinyin: String = "",
@@ -268,7 +268,7 @@ struct AddCardSheet: View {
 
             ToolbarItem(placement: .confirmationAction) {
                 Button(actionTitle) {
-                    Task {
+                    Task { @MainActor in
                         let success = await onSave(trimmedChinese, trimmedPinyin, trimmedEnglish)
                         if success {
                             dismiss()
@@ -285,7 +285,7 @@ struct AddCardSheet: View {
         ) {
             Button("Delete", role: .destructive) {
                 guard let onDelete else { return }
-                Task {
+                Task { @MainActor in
                     let success = await onDelete()
                     if success {
                         dismiss()
@@ -469,7 +469,7 @@ private final class TranslationQueue {
             isSaving: false,
             errorMessage: nil,
             existingPhraseKeys: [],
-            onSave: { _, _, _ in
+            onSave: { @MainActor _, _, _ in
                 await Task.yield()
                 return true
             },

@@ -2,13 +2,33 @@ import Foundation
 import Supabase
 
 struct FlashcardRepository {
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     func fetchCards(for userId: UUID) async throws -> [Flashcard] {
         try await supabase
             .from("flashcards")
             .select(
-                "id, chinese, pinyin, english, example, example_pinyin, example_english, state, stability, difficulty, last_review_at, lapses, reps, learning_step"
+                "id, chinese, pinyin, english, example, example_pinyin, example_english, created_at, state, stability, difficulty, last_review_at, lapses, reps, learning_step"
             )
             .eq("user_id", value: userId.uuidString)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+    }
+
+    func fetchCardsCreated(after createdAt: Date, userId: UUID) async throws -> [Flashcard] {
+        let cutoff = Self.iso8601Formatter.string(from: createdAt)
+        return try await supabase
+            .from("flashcards")
+            .select(
+                "id, chinese, pinyin, english, example, example_pinyin, example_english, created_at, state, stability, difficulty, last_review_at, lapses, reps, learning_step"
+            )
+            .eq("user_id", value: userId.uuidString)
+            .gt("created_at", value: cutoff)
             .order("created_at", ascending: true)
             .execute()
             .value
