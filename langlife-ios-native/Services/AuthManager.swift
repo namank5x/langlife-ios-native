@@ -1,9 +1,11 @@
 import Auth
 import AuthenticationServices
 import Combine
+import CryptoKit
 import Foundation
 import GoogleSignIn
 import Supabase
+import Security
 import UIKit
 
 @MainActor
@@ -39,7 +41,7 @@ final class AuthManager: ObservableObject {
         authStateTask?.cancel()
     }
 
-    func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws {
+    func signInWithApple(credential: ASAuthorizationAppleIDCredential, rawNonce: String) async throws {
         guard
             let identityToken = credential.identityToken,
             let idToken = String(data: identityToken, encoding: .utf8)
@@ -50,7 +52,8 @@ final class AuthManager: ObservableObject {
         _ = try await supabase.auth.signInWithIdToken(
             credentials: .init(
                 provider: .apple,
-                idToken: idToken
+                idToken: idToken,
+                nonce: rawNonce
             )
         )
 
@@ -67,8 +70,8 @@ final class AuthManager: ObservableObject {
         appleSignInCoordinator = coordinator
         defer { appleSignInCoordinator = nil }
 
-        let credential = try await coordinator.start()
-        try await signInWithApple(credential: credential)
+        let result = try await coordinator.start()
+        try await signInWithApple(credential: result.credential, rawNonce: result.rawNonce)
     }
 
     func signInWithGoogle(presentingViewController: UIViewController? = nil) async throws {
@@ -205,6 +208,7 @@ final class AuthManager: ObservableObject {
 enum AuthManagerError: LocalizedError {
     case invalidIdentityToken
     case invalidAppleCredential
+    case invalidAppleNonce
     case invalidGoogleIdentityToken
     case invalidGoogleAccessToken
     case missingPresentingViewController
@@ -215,6 +219,8 @@ enum AuthManagerError: LocalizedError {
             return "Unable to read the Apple identity token."
         case .invalidAppleCredential:
             return "Unexpected Apple credential."
+        case .invalidAppleNonce:
+            return "Unable to generate the Apple sign-in nonce."
         case .invalidGoogleIdentityToken:
             return "Unable to read the Google identity token."
         case .invalidGoogleAccessToken:
@@ -233,19 +239,28 @@ private extension UIWindowScene {
 
 private final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     private let window: UIWindow
-    private var continuation: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>?
+    private var continuation: CheckedContinuation<AppleSignInResult, Error>?
     private var controller: ASAuthorizationController?
+    private var rawNonce: String?
 
     init(window: UIWindow) {
         self.window = window
     }
 
-    func start() async throws -> ASAuthorizationAppleIDCredential {
+    func start() async throws -> AppleSignInResult {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
 
             let request = ASAuthorizationAppleIDProvider().createRequest()
             request.requestedScopes = [.email, .fullName]
+            do {
+                let rawNonce = try Self.randomNonce()
+                self.rawNonce = rawNonce
+                request.nonce = Self.sha256(rawNonce)
+            } catch {
+                resume(with: .failure(error))
+                return
+            }
 
             let controller = ASAuthorizationController(authorizationRequests: [request])
             controller.delegate = self
@@ -260,7 +275,11 @@ private final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerD
             resume(with: .failure(AuthManagerError.invalidAppleCredential))
             return
         }
-        resume(with: .success(credential))
+        guard let rawNonce else {
+            resume(with: .failure(AuthManagerError.invalidAppleNonce))
+            return
+        }
+        resume(with: .success(AppleSignInResult(credential: credential, rawNonce: rawNonce)))
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
@@ -271,10 +290,47 @@ private final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerD
         window
     }
 
-    private func resume(with result: Result<ASAuthorizationAppleIDCredential, Error>) {
+    private func resume(with result: Result<AppleSignInResult, Error>) {
         guard let continuation else { return }
         continuation.resume(with: result)
         self.continuation = nil
         controller = nil
+        rawNonce = nil
     }
+
+    private static func randomNonce(length: Int = 32) throws -> String {
+        precondition(length > 0)
+        let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+
+        while remainingLength > 0 {
+            var randoms = [UInt8](repeating: 0, count: 16)
+            let status = SecRandomCopyBytes(kSecRandomDefault, randoms.count, &randoms)
+            if status != errSecSuccess {
+                throw AuthManagerError.invalidAppleNonce
+            }
+
+            for random in randoms {
+                if remainingLength == 0 { break }
+                if random < charset.count {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
+            }
+        }
+
+        return result
+    }
+
+    private static func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashed = SHA256.hash(data: inputData)
+        return hashed.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private struct AppleSignInResult {
+    let credential: ASAuthorizationAppleIDCredential
+    let rawNonce: String
 }

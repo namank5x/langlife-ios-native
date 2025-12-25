@@ -18,6 +18,16 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>SUPABASE_URL</key>
+	<string>$(SUPABASE_SCHEME)://$(SUPABASE_HOST)</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>API_BASE_URL</key>
+	<string>$(API_SCHEME)://$(API_HOST_AND_PORT)</string>
+	<key>GOOGLE_IOS_CLIENT_ID</key>
+	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
+	<key>GOOGLE_SERVER_CLIENT_ID</key>
+	<string>$(GOOGLE_SERVER_CLIENT_ID)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We use the microphone so you can practice speaking the scene lines.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

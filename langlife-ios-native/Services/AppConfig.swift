@@ -2,33 +2,23 @@ import Foundation
 
 enum AppConfig {
     static var supabaseURL: URL {
-        guard let value = SupabaseConfig["SUPABASE_URL"],
-              let url = URL(string: value)
-        else {
-            preconditionFailure("Missing SUPABASE_URL in Supabase.plist")
-        }
-        return url
+        validatedURL(for: "SUPABASE_URL")
     }
 
     static var supabaseAnonKey: String {
         guard let value = SupabaseConfig["SUPABASE_ANON_KEY"], !value.isEmpty else {
-            preconditionFailure("Missing SUPABASE_ANON_KEY in Supabase.plist")
+            preconditionFailure("Missing SUPABASE_ANON_KEY in app configuration")
         }
         return value
     }
 
     static var apiBaseURL: URL {
-        guard let value = SupabaseConfig["API_BASE_URL"],
-              let url = URL(string: value)
-        else {
-            preconditionFailure("Missing API_BASE_URL in Supabase.plist")
-        }
-        return url
+        validatedURL(for: "API_BASE_URL")
     }
 
     static var googleClientID: String {
         guard let value = SupabaseConfig["GOOGLE_IOS_CLIENT_ID"], !value.isEmpty else {
-            preconditionFailure("Missing GOOGLE_IOS_CLIENT_ID in Supabase.plist")
+            preconditionFailure("Missing GOOGLE_IOS_CLIENT_ID in app configuration")
         }
         return value
     }
@@ -38,5 +28,22 @@ enum AppConfig {
             return nil
         }
         return value
+    }
+
+    private static func validatedURL(for key: String) -> URL {
+        guard let value = SupabaseConfig[key], !value.isEmpty else {
+            preconditionFailure("Missing \(key) in app configuration")
+        }
+        guard let url = URL(string: value) else {
+            preconditionFailure("Invalid \(key) URL: \(value)")
+        }
+        guard let scheme = url.scheme,
+              (scheme == "http" || scheme == "https"),
+              let host = url.host,
+              !host.isEmpty
+        else {
+            preconditionFailure("Invalid \(key) URL: \(value). Expected http(s)://host")
+        }
+        return url
     }
 }

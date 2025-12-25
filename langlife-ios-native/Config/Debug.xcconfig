@@ -1,7 +1,9 @@
 // Debug/local configuration
-SUPABASE_URL = http://192.168.0.11:54421
+SUPABASE_SCHEME = http
+SUPABASE_HOST = 192.168.0.11:54421
 SUPABASE_ANON_KEY = sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
-API_BASE_URL = http://192.168.0.11:3000
+API_SCHEME = http
+API_HOST_AND_PORT = 192.168.0.11:3000
 GOOGLE_IOS_CLIENT_ID = 1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4.apps.googleusercontent.com
 GOOGLE_SERVER_CLIENT_ID = 1075777048946-9do35ss4b3amla5v0t29danllgimvl7i.apps.googleusercontent.com
 GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4
