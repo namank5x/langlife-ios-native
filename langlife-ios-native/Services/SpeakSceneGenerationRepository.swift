@@ -1,28 +1,28 @@
 import Foundation
 
 struct SpeakSceneGenerationRepository {
-    private let apiClient: APIClient
+    private let generator = SceneGenerationCoordinator()
 
-    init(apiClient: APIClient = APIClient()) {
-        self.apiClient = apiClient
+    func generateScenes(
+        count: Int,
+        excludeIds: [String],
+        existingTitles: [String],
+        userId: UUID?
+    ) async throws -> [SpeakScene] {
+        let scenes = try await generator.generateScenes(
+            count: count,
+            excludeTitles: existingTitles,
+            excludeIds: excludeIds,
+            existingTitles: existingTitles
+        )
+        if let userId {
+            for scene in scenes {
+                LocalSceneOutboxStore.enqueue(scene: scene, userId: userId)
+            }
+            Task {
+                await SceneSyncService.shared.syncIfNeeded(userId: userId)
+            }
+        }
+        return scenes
     }
-
-    func generateScenes(count: Int, excludeIds: [String]) async throws -> [SpeakScene] {
-        let request = GenerateSceneRequest(count: count, excludeIds: excludeIds)
-        let data = try await apiClient.postJSON("/api/scenes/generate", body: request)
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .useDefaultKeys
-        decoder.dateDecodingStrategy = .custom(ISO8601DateDecoder.decode)
-        let response = try decoder.decode(GenerateSceneResponse.self, from: data)
-        return response.scenes
-    }
-}
-
-private struct GenerateSceneRequest: Encodable {
-    let count: Int
-    let excludeIds: [String]
-}
-
-private struct GenerateSceneResponse: Decodable {
-    let scenes: [SpeakScene]
 }

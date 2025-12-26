@@ -24,7 +24,8 @@ final class SpeakSceneStore: ObservableObject {
                 scenes = []
                 loadCachedScenes(for: userId)
                 if scenes.isEmpty {
-                    scenes = SpeakSceneSeed.defaults
+                    let pending = pendingScenes(for: userId)
+                    scenes = pending.isEmpty ? SpeakSceneSeed.defaults : pending
                 }
                 lastLoadedUserId = userId
             }
@@ -76,15 +77,18 @@ final class SpeakSceneStore: ObservableObject {
         if let userId {
             LocalSpeakSceneStore.save(scenes, userId: userId)
             LocalSpeakSceneDetailStore.clear(userId: userId, sceneId: id)
+            LocalSceneOutboxStore.remove(userId: userId, sceneId: id)
             touchSyncState(userId: userId)
         }
     }
 
     private func refreshIfStale(for userId: UUID, force: Bool = false) async {
+        let hadError = errorMessage != nil
+        errorMessage = nil
         let syncState = LocalSpeakSceneStore.loadSyncState(userId: userId)
         if !force, let syncState {
             let age = Date().timeIntervalSince(syncState.lastSyncAt)
-            if age < syncTTL { return }
+            if age < syncTTL, !hadError { return }
         }
 
         await refreshFromServer(for: userId, syncState: syncState)
@@ -123,13 +127,14 @@ final class SpeakSceneStore: ObservableObject {
             let fetchedScenes = try await repository.fetchScenes(for: userId)
             guard lastLoadedUserId == userId else { return }
             if fetchedScenes.isEmpty {
-                scenes = SpeakSceneSeed.defaults
+                let pending = pendingScenes(for: userId)
+                scenes = pending.isEmpty ? SpeakSceneSeed.defaults : pending
                 LocalSpeakSceneStore.save(scenes, userId: userId)
                 updateSyncState(userId: userId, lastServerCreatedAt: nil)
                 return
             }
 
-            scenes = fetchedScenes
+            scenes = mergeWithPendingScenes(fetchedScenes, userId: userId)
             LocalSpeakSceneStore.save(scenes, userId: userId)
             let maxCreatedAt = fetchedScenes.compactMap(\.createdAt).max()
             updateSyncState(userId: userId, lastServerCreatedAt: maxCreatedAt)
@@ -170,6 +175,18 @@ final class SpeakSceneStore: ObservableObject {
             updatedScenes = toPrepend + updatedScenes
         }
         scenes = updatedScenes
+    }
+
+    private func mergeWithPendingScenes(_ remoteScenes: [SpeakScene], userId: UUID) -> [SpeakScene] {
+        let pending = pendingScenes(for: userId)
+        guard !pending.isEmpty else { return remoteScenes }
+        let remoteById = Set(remoteScenes.map { $0.id })
+        let pendingOnly = pending.filter { !remoteById.contains($0.id) }
+        return pendingOnly + remoteScenes
+    }
+
+    private func pendingScenes(for userId: UUID) -> [SpeakScene] {
+        LocalSceneOutboxStore.pendingScenes(userId: userId)
     }
 
     private func updateSyncState(userId: UUID, lastServerCreatedAt: Date?) {

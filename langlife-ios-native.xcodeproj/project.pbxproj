@@ -10,6 +10,7 @@
 		B630F3832D4C4223871EC1A4 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408BD /* Supabase */; };
 		B6A0A1B2C3D4E5F607182930 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408BE /* GoogleSignIn */; };
 		B6A0A1B2C3D4E5F607182931 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408BF /* GoogleSignInSwift */; };
+		B6A0A1B2C3D4E5F607182932 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408C0 /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,7 @@
 			files = (
 				B6A0A1B2C3D4E5F607182930 /* GoogleSignIn in Frameworks */,
 				B6A0A1B2C3D4E5F607182931 /* GoogleSignInSwift in Frameworks */,
+				B6A0A1B2C3D4E5F607182932 /* GRDB in Frameworks */,
 				B630F3832D4C4223871EC1A4 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -88,6 +90,7 @@
 			packageProductDependencies = (
 				82E868B8DA6849DC958408BE /* GoogleSignIn */,
 				82E868B8DA6849DC958408BF /* GoogleSignInSwift */,
+				82E868B8DA6849DC958408C0 /* GRDB */,
 				82E868B8DA6849DC958408BD /* Supabase */,
 			);
 			productName = "langlife-ios-native";
@@ -120,6 +123,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				F388653F0675420EBF18A5BA /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				F388653F0675420EBF18A5BB /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				F388653F0675420EBF18A5B9 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -382,6 +386,14 @@
 				minimumVersion = 7.0.0;
 			};
 		};
+		F388653F0675420EBF18A5BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -399,6 +411,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F388653F0675420EBF18A5BA /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
+		};
+		82E868B8DA6849DC958408C0 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F388653F0675420EBF18A5BB /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

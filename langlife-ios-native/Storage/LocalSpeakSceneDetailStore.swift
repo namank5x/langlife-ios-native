@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 struct SpeakSceneDetailCache: Codable {
     let outline: SpeakChatOutline
@@ -6,118 +7,214 @@ struct SpeakSceneDetailCache: Codable {
     let cachedAt: Date
 }
 
-private struct SpeakSceneDetailIndexEntry: Codable {
-    let sceneId: UUID
-    let lastAccessedAt: Date
-}
-
 enum LocalSpeakSceneDetailStore {
-    private static let storageKey = "speak_scene_detail"
-    private static let indexKey = "speak_scene_detail_index"
     private static let maxEntries = 50
 
     static func load(userId: UUID, sceneId: UUID) -> SpeakSceneDetailCache? {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey(for: userId, sceneId: sceneId)) else {
-            return nil
-        }
+        let userKey = LocalStoreKeys.userKey(userId)
+        let cache = AppDatabase.read { db -> SpeakSceneDetailCache? in
+            guard let detailRow = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT practice_tip, outline, cached_at
+                FROM speak_scene_details
+                WHERE user_id = ? AND scene_id = ?
+                """,
+                arguments: [userKey, sceneId.uuidString]
+            ) else {
+                return nil
+            }
 
-        do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let cache = try decoder.decode(SpeakSceneDetailCache.self, from: data)
-            touchIndex(userId: userId, sceneId: sceneId)
-            return cache
-        } catch {
-            return nil
+            guard let outlineJson: String = detailRow["outline"],
+                  let outlineTurns = LocalStoreCoders.decode([SpeakTurnOutline].self, from: outlineJson)
+            else {
+                return nil
+            }
+
+            let practiceTip: String? = detailRow["practice_tip"]
+            let outline = SpeakChatOutline(
+                sceneId: sceneId,
+                turns: outlineTurns,
+                practiceTip: practiceTip
+            )
+
+            let cachedAtSeconds: Double? = detailRow["cached_at"]
+            let cachedAt = cachedAtSeconds.map { Date(timeIntervalSince1970: $0) } ?? Date()
+
+            let turnRows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT step, ai_line, user_line, speak_first, focus_hint
+                FROM speak_scene_turns
+                WHERE user_id = ? AND scene_id = ?
+                ORDER BY step ASC
+                """,
+                arguments: [userKey, sceneId.uuidString]
+            )
+
+            let turns = turnRows.compactMap { row -> SpeakTurn? in
+                let step: Int = row["step"]
+                guard let aiLineJson: String = row["ai_line"],
+                      let userLineJson: String = row["user_line"],
+                      let aiLine = LocalStoreCoders.decode(SpeakLine.self, from: aiLineJson),
+                      let userLine = LocalStoreCoders.decode(SpeakLine.self, from: userLineJson)
+                else {
+                    return nil
+                }
+                let speakFirstRaw: String = row["speak_first"]
+                guard let speakFirst = SpeakRole(rawValue: speakFirstRaw) else { return nil }
+                let focusHint: String? = row["focus_hint"]
+                return SpeakTurn(
+                    step: step,
+                    aiLine: aiLine,
+                    userLine: userLine,
+                    speakFirst: speakFirst,
+                    focusHint: focusHint
+                )
+            }
+
+            return SpeakSceneDetailCache(outline: outline, turns: turns, cachedAt: cachedAt)
         }
+        if cache != nil {
+            AppDatabase.write { db in
+                touch(db: db, userKey: userKey, sceneId: sceneId, cachedAt: Date())
+            }
+        }
+        return cache
     }
 
     static func save(_ cache: SpeakSceneDetailCache, userId: UUID, sceneId: UUID) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(cache)
-            UserDefaults.standard.set(data, forKey: cacheKey(for: userId, sceneId: sceneId))
-            touchIndex(userId: userId, sceneId: sceneId)
-            enforceLimit(for: userId)
-        } catch {
-            return
+        let userKey = LocalStoreKeys.userKey(userId)
+        AppDatabase.write { db in
+            guard let outlineJson = LocalStoreCoders.encode(cache.outline.turns) else { return }
+            let cachedAt = cache.cachedAt.timeIntervalSince1970
+
+            try db.execute(
+                sql: """
+                INSERT INTO speak_scene_details
+                    (id, user_id, scene_id, practice_tip, outline, outline_turn_count,
+                     outline_generated_at, cached_at)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(scene_id, user_id) DO UPDATE SET
+                    practice_tip = excluded.practice_tip,
+                    outline = excluded.outline,
+                    outline_turn_count = excluded.outline_turn_count,
+                    outline_generated_at = excluded.outline_generated_at,
+                    cached_at = excluded.cached_at
+                """,
+                arguments: [
+                    sceneId.uuidString,
+                    userKey,
+                    sceneId.uuidString,
+                    cache.outline.practiceTip,
+                    outlineJson,
+                    cache.outline.turns.count,
+                    cachedAt,
+                    cachedAt
+                ]
+            )
+
+            try db.execute(
+                sql: "DELETE FROM speak_scene_turns WHERE user_id = ? AND scene_id = ?",
+                arguments: [userKey, sceneId.uuidString]
+            )
+
+            for turn in cache.turns {
+                guard let aiLineJson = LocalStoreCoders.encode(turn.aiLine),
+                      let userLineJson = LocalStoreCoders.encode(turn.userLine)
+                else { continue }
+                try db.execute(
+                    sql: """
+                    INSERT INTO speak_scene_turns
+                        (id, user_id, scene_id, step, ai_line, user_line, speak_first, focus_hint, generated_at)
+                    VALUES
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        "\(sceneId.uuidString)-\(turn.step)",
+                        userKey,
+                        sceneId.uuidString,
+                        turn.step,
+                        aiLineJson,
+                        userLineJson,
+                        turn.speakFirst.rawValue,
+                        turn.focusHint,
+                        cachedAt
+                    ]
+                )
+            }
+
+            enforceLimit(db: db, userKey: userKey)
         }
     }
 
     static func clear(userId: UUID, sceneId: UUID) {
-        UserDefaults.standard.removeObject(forKey: cacheKey(for: userId, sceneId: sceneId))
-        removeFromIndex(userId: userId, sceneId: sceneId)
+        let userKey = LocalStoreKeys.userKey(userId)
+        AppDatabase.write { db in
+            try db.execute(
+                sql: "DELETE FROM speak_scene_details WHERE user_id = ? AND scene_id = ?",
+                arguments: [userKey, sceneId.uuidString]
+            )
+            try db.execute(
+                sql: "DELETE FROM speak_scene_turns WHERE user_id = ? AND scene_id = ?",
+                arguments: [userKey, sceneId.uuidString]
+            )
+        }
     }
 
     static func clearAll(userId: UUID) {
-        let entries = loadIndex(for: userId)
-        for entry in entries {
-            UserDefaults.standard.removeObject(forKey: cacheKey(for: userId, sceneId: entry.sceneId))
-        }
-        UserDefaults.standard.removeObject(forKey: indexKeyForUser(userId))
-    }
-
-    private static func touchIndex(userId: UUID, sceneId: UUID) {
-        var entries = loadIndex(for: userId)
-        let now = Date()
-        if let index = entries.firstIndex(where: { $0.sceneId == sceneId }) {
-            entries[index] = SpeakSceneDetailIndexEntry(sceneId: sceneId, lastAccessedAt: now)
-        } else {
-            entries.append(SpeakSceneDetailIndexEntry(sceneId: sceneId, lastAccessedAt: now))
-        }
-        saveIndex(entries, for: userId)
-    }
-
-    private static func removeFromIndex(userId: UUID, sceneId: UUID) {
-        var entries = loadIndex(for: userId)
-        entries.removeAll { $0.sceneId == sceneId }
-        saveIndex(entries, for: userId)
-    }
-
-    private static func enforceLimit(for userId: UUID) {
-        var entries = loadIndex(for: userId)
-        guard entries.count > maxEntries else { return }
-        entries.sort { $0.lastAccessedAt < $1.lastAccessedAt }
-        let overflow = entries.count - maxEntries
-        let toRemove = entries.prefix(overflow)
-        for entry in toRemove {
-            UserDefaults.standard.removeObject(forKey: cacheKey(for: userId, sceneId: entry.sceneId))
-        }
-        entries.removeFirst(overflow)
-        saveIndex(entries, for: userId)
-    }
-
-    private static func loadIndex(for userId: UUID) -> [SpeakSceneDetailIndexEntry] {
-        guard let data = UserDefaults.standard.data(forKey: indexKeyForUser(userId)) else {
-            return []
-        }
-
-        do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode([SpeakSceneDetailIndexEntry].self, from: data)
-        } catch {
-            return []
+        let userKey = LocalStoreKeys.userKey(userId)
+        AppDatabase.write { db in
+            try db.execute(
+                sql: "DELETE FROM speak_scene_details WHERE user_id = ?",
+                arguments: [userKey]
+            )
+            try db.execute(
+                sql: "DELETE FROM speak_scene_turns WHERE user_id = ?",
+                arguments: [userKey]
+            )
         }
     }
 
-    private static func saveIndex(_ entries: [SpeakSceneDetailIndexEntry], for userId: UUID) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(entries)
-            UserDefaults.standard.set(data, forKey: indexKeyForUser(userId))
-        } catch {
-            return
+    private static func touch(db: Database, userKey: String, sceneId: UUID, cachedAt: Date) {
+        try? db.execute(
+            sql: """
+            UPDATE speak_scene_details
+            SET cached_at = ?
+            WHERE user_id = ? AND scene_id = ?
+            """,
+            arguments: [cachedAt.timeIntervalSince1970, userKey, sceneId.uuidString]
+        )
+    }
+
+    private static func enforceLimit(db: Database, userKey: String) {
+        guard maxEntries > 0 else { return }
+        let rows = (try? Row.fetchAll(
+            db,
+            sql: """
+            SELECT scene_id
+            FROM speak_scene_details
+            WHERE user_id = ?
+            ORDER BY cached_at ASC
+            """,
+            arguments: [userKey]
+        )) ?? []
+
+        guard rows.count > maxEntries else { return }
+        let overflow = rows.count - maxEntries
+        let toRemove = rows.prefix(overflow).compactMap { row -> String? in
+            row["scene_id"]
         }
-    }
-
-    private static func cacheKey(for userId: UUID, sceneId: UUID) -> String {
-        "\(storageKey).\(userId.uuidString).\(sceneId.uuidString)"
-    }
-
-    private static func indexKeyForUser(_ userId: UUID) -> String {
-        "\(indexKey).\(userId.uuidString)"
+        for sceneId in toRemove {
+            try? db.execute(
+                sql: "DELETE FROM speak_scene_details WHERE user_id = ? AND scene_id = ?",
+                arguments: [userKey, sceneId]
+            )
+            try? db.execute(
+                sql: "DELETE FROM speak_scene_turns WHERE user_id = ? AND scene_id = ?",
+                arguments: [userKey, sceneId]
+            )
+        }
     }
 }

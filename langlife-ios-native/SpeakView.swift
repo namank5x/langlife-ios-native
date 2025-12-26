@@ -177,6 +177,11 @@ struct SpeakView: View {
         }
         .onChange(of: scenePhase) { _ in
             startPendingSignInIfPossible()
+            if scenePhase == .active, let userId = authManager.user?.id {
+                Task {
+                    await SceneSyncService.shared.syncIfNeeded(userId: userId)
+                }
+            }
         }
         .onChange(of: generateRequestID) { _, _ in
             handleGenerateSceneRequest()
@@ -206,6 +211,9 @@ struct SpeakView: View {
     @MainActor
     private func loadScenesIfNeeded() async {
         await sceneStore.loadIfNeeded(for: authManager.user?.id)
+        if let userId = authManager.user?.id {
+            await SceneSyncService.shared.syncIfNeeded(userId: userId)
+        }
         if authManager.user == nil {
             selectedSceneId = nil
             selectedScene = nil
@@ -411,9 +419,12 @@ struct SpeakView: View {
 
         do {
             let excludeIds = sceneStore.scenes.map { $0.id.uuidString }
+            let existingTitles = sceneStore.scenes.map { $0.title }
             let generated = try await generationRepository.generateScenes(
                 count: 1,
-                excludeIds: Array(excludeIds.prefix(50))
+                excludeIds: Array(excludeIds.prefix(50)),
+                existingTitles: existingTitles,
+                userId: authManager.user?.id
             )
             guard let scene = generated.first else {
                 actionErrorMessage = "No new scenes available right now."
@@ -443,7 +454,11 @@ struct SpeakView: View {
         defer { isCreatingScene = false }
 
         do {
-            let scene = try await creationRepository.createScene(prompt: prompt)
+            let scene = try await creationRepository.createScene(
+                prompt: prompt,
+                existingTitles: sceneStore.scenes.map { $0.title },
+                userId: authManager.user?.id
+            )
             if let userId = authManager.user?.id {
                 sceneStore.upsertScene(scene, userId: userId)
             }
@@ -456,6 +471,9 @@ struct SpeakView: View {
     }
 
     private func mapAddSceneError(_ error: Error) -> String {
+        if case SceneGenerationError.invalidResponse = error {
+            return "Unable to create that scene right now."
+        }
         guard let apiError = error as? APIClientError else {
             return "Unable to create that scene right now."
         }
@@ -478,6 +496,9 @@ struct SpeakView: View {
     }
 
     private func mapGenerateSceneError(_ error: Error) -> String {
+        if case SceneGenerationError.invalidResponse = error {
+            return "Unable to generate a scene right now."
+        }
         guard let apiError = error as? APIClientError else {
             return "Unable to generate a scene right now."
         }

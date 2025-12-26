@@ -17,6 +17,7 @@ final class SpeakSceneDetailViewModel: ObservableObject {
     private var prefetchedTurns: [Int: SpeakTurn] = [:]
     private var currentUserId: UUID?
     private var currentSceneId: UUID?
+    private var currentScene: SpeakScene?
     private let cacheTTL: TimeInterval = 24 * 60 * 60
 
     init(repository: SpeakSceneDetailRepository = SpeakSceneDetailRepository()) {
@@ -39,6 +40,7 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         guard !isLoadingOutline else { return }
         currentUserId = userId
         currentSceneId = scene.id
+        currentScene = scene
         isLoadingOutline = true
         outlineError = nil
         turnError = nil
@@ -70,7 +72,7 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         if hasFreshCache { return }
 
         do {
-            let result = try await repository.fetchOutline(for: scene)
+            let result = try await repository.fetchOutline(for: scene, userId: userId)
             if Task.isCancelled { return }
             outline = result.outline
             mergePrefetchedTurns(with: result.turns)
@@ -163,8 +165,14 @@ final class SpeakSceneDetailViewModel: ObservableObject {
             return
         }
 
+        guard let scene = currentScene else { return }
         do {
-            let turn = try await repository.fetchTurn(sceneId: outline.sceneId, step: step)
+            let turn = try await repository.fetchTurn(
+                scene: scene,
+                outline: outline,
+                step: step,
+                userId: currentUserId
+            )
             if Task.isCancelled { return }
             turns = mergeTurns(existing: turns, incoming: turn)
             if !existingSteps.contains(turn.step) {

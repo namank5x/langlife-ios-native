@@ -17,7 +17,6 @@ struct SettingsView: View {
     @State private var pendingSignInProvider: SignInProvider?
     @State private var shouldStartSignIn = false
     @State private var errorMessage: String?
-
     var body: some View {
         NavigationStack {
             List {

@@ -384,7 +384,7 @@ struct SpeakSceneDetailView: View {
     @MainActor
     private func deleteScene() async {
         guard !isDeletingScene else { return }
-        guard authManager.user != nil else {
+        guard let userId = authManager.user?.id else {
             deleteError = "Please sign in to delete this scene."
             return
         }
@@ -394,10 +394,20 @@ struct SpeakSceneDetailView: View {
         defer { isDeletingScene = false }
 
         do {
+            if LocalSceneOutboxStore.pendingSceneIds(userId: userId).contains(scene.id) {
+                onDelete(scene)
+                dismiss()
+                return
+            }
             try await deletionRepository.deleteScene(id: scene.id)
             onDelete(scene)
             dismiss()
         } catch {
+            if isMissingRemoteScene(error) {
+                onDelete(scene)
+                dismiss()
+                return
+            }
             deleteError = mapDeleteSceneError(error)
         }
     }
@@ -416,6 +426,13 @@ struct SpeakSceneDetailView: View {
                 return "Unable to delete this scene right now."
             }
         }
+    }
+
+    private func isMissingRemoteScene(_ error: Error) -> Bool {
+        if case APIClientError.httpError(let statusCode) = error {
+            return statusCode == 404
+        }
+        return false
     }
 
     private func startSpeech(for key: SpeechKey) async {
