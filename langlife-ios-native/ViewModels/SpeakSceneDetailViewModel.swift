@@ -15,6 +15,9 @@ final class SpeakSceneDetailViewModel: ObservableObject {
 
     private let repository: SpeakSceneDetailRepository
     private var prefetchedTurns: [Int: SpeakTurn] = [:]
+    private var currentUserId: UUID?
+    private var currentSceneId: UUID?
+    private let cacheTTL: TimeInterval = 24 * 60 * 60
 
     init(repository: SpeakSceneDetailRepository = SpeakSceneDetailRepository()) {
         self.repository = repository
@@ -32,35 +35,59 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         return nil
     }
 
-    func loadOutline(scene: SpeakScene) async {
+    func loadOutline(scene: SpeakScene, userId: UUID?) async {
         guard !isLoadingOutline else { return }
+        currentUserId = userId
+        currentSceneId = scene.id
         isLoadingOutline = true
         outlineError = nil
         turnError = nil
-        turns = []
         speechAttempts = [:]
         activeSpeechKey = nil
         latestLoadedTurnStep = nil
+        prefetchedTurns = [:]
+
+        let cachedDetail = loadCachedDetail(userId: userId, sceneId: scene.id)
+        let cacheAge = cachedDetail.map { Date().timeIntervalSince($0.cachedAt) }
+        let hasFreshCache = cacheAge.map { $0 < cacheTTL } ?? false
+
+        if let cachedDetail {
+            outline = cachedDetail.outline
+            turns = []
+            prefetchedTurns = Dictionary(uniqueKeysWithValues: cachedDetail.turns.map { ($0.step, $0) })
+        } else {
+            outline = nil
+            turns = []
+            prefetchedTurns = [:]
+        }
 
         defer { isLoadingOutline = false }
+
+        if turns.isEmpty, nextStep != nil {
+            await loadNextTurn()
+        }
+
+        if hasFreshCache { return }
 
         do {
             let result = try await repository.fetchOutline(for: scene)
             if Task.isCancelled { return }
             outline = result.outline
-            turns = []
-            prefetchedTurns = Dictionary(uniqueKeysWithValues: result.turns.map { ($0.step, $0) })
-            if nextStep != nil {
+            mergePrefetchedTurns(with: result.turns)
+            persistCache()
+            if turns.isEmpty, nextStep != nil {
                 await loadNextTurn()
             }
         } catch {
             outlineError = mapErrorMessage(error, fallback: "Unable to load the scene outline.")
-            outline = nil
-            turns = []
-            prefetchedTurns = [:]
-            speechAttempts = [:]
-            activeSpeechKey = nil
-            latestLoadedTurnStep = nil
+            if cachedDetail == nil {
+                outline = nil
+                turns = []
+                prefetchedTurns = [:]
+                speechAttempts = [:]
+                activeSpeechKey = nil
+                latestLoadedTurnStep = nil
+            }
         }
     }
 
@@ -132,6 +159,7 @@ final class SpeakSceneDetailViewModel: ObservableObject {
             if !existingSteps.contains(cached.step) {
                 latestLoadedTurnStep = cached.step
             }
+            persistCache()
             return
         }
 
@@ -142,6 +170,7 @@ final class SpeakSceneDetailViewModel: ObservableObject {
             if !existingSteps.contains(turn.step) {
                 latestLoadedTurnStep = turn.step
             }
+            persistCache()
         } catch {
             turnError = mapErrorMessage(error, fallback: "Unable to load the next turn.")
         }
@@ -169,6 +198,22 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         }
     }
 
+    private func loadCachedDetail(userId: UUID?, sceneId: UUID) -> SpeakSceneDetailCache? {
+        guard let userId else { return nil }
+        return LocalSpeakSceneDetailStore.load(userId: userId, sceneId: sceneId)
+    }
+
+    private func persistCache() {
+        guard let userId = currentUserId, let outline else { return }
+        guard currentSceneId == outline.sceneId else { return }
+        let cache = SpeakSceneDetailCache(
+            outline: outline,
+            turns: cachedTurnsSnapshot(),
+            cachedAt: Date()
+        )
+        LocalSpeakSceneDetailStore.save(cache, userId: userId, sceneId: outline.sceneId)
+    }
+
     private func sortTurns(_ list: [SpeakTurn]) -> [SpeakTurn] {
         list.sorted { $0.step < $1.step }
     }
@@ -176,6 +221,21 @@ final class SpeakSceneDetailViewModel: ObservableObject {
     private func mergeTurns(existing: [SpeakTurn], incoming: SpeakTurn) -> [SpeakTurn] {
         let remaining = existing.filter { $0.step != incoming.step }
         return sortTurns(remaining + [incoming])
+    }
+
+    private func mergePrefetchedTurns(with incoming: [SpeakTurn]) {
+        let existingSteps = Set(turns.map { $0.step })
+        var merged = prefetchedTurns
+        for turn in incoming where !existingSteps.contains(turn.step) {
+            merged[turn.step] = turn
+        }
+        prefetchedTurns = merged
+    }
+
+    private func cachedTurnsSnapshot() -> [SpeakTurn] {
+        let combined = Array(prefetchedTurns.values) + turns
+        let byStep = Dictionary(combined.map { ($0.step, $0) }, uniquingKeysWith: { _, new in new })
+        return sortTurns(Array(byStep.values))
     }
 
     private func normalize(_ text: String) -> String {

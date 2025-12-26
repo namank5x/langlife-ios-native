@@ -11,7 +11,8 @@ struct SpeakSceneGenerationRepository {
         let request = GenerateSceneRequest(count: count, excludeIds: excludeIds)
         let data = try await apiClient.postJSON("/api/scenes/generate", body: request)
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.keyDecodingStrategy = .useDefaultKeys
+        decoder.dateDecodingStrategy = .custom(ISO8601DateDecoder.decode)
         let response = try decoder.decode(GenerateSceneResponse.self, from: data)
         return response.scenes
     }

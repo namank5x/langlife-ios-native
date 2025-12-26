@@ -13,6 +13,7 @@ import UIKit
 struct SpeakView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var cardStore: FlashcardStore
+    @EnvironmentObject private var sceneStore: SpeakSceneStore
     @Environment(\.scenePhase) private var scenePhase
     @Binding var signInPresenter: UIViewController?
     @Binding var generateRequestID: UUID
@@ -20,9 +21,7 @@ struct SpeakView: View {
     @Binding var isAddSceneEnabled: Bool
     @Binding var isGenerateSceneEnabled: Bool
 
-    @State private var scenes: [SpeakScene] = SpeakSceneSeed.defaults
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var actionErrorMessage: String?
     @State private var selectedSceneId: UUID?
     @State private var selectedScene: SpeakScene?
     @State private var isCreatingScene = false
@@ -38,7 +37,6 @@ struct SpeakView: View {
     @State private var pendingAddScene = false
     @State private var pendingGenerateScene = false
 
-    private let repository = SpeakRepository()
     private let creationRepository = SpeakSceneCreationRepository()
     private let generationRepository = SpeakSceneGenerationRepository()
 
@@ -54,7 +52,7 @@ struct SpeakView: View {
                         .clipShape(Capsule())
                 }
 
-                ForEach(scenes) { scene in
+                ForEach(sceneStore.scenes) { scene in
                     Button {
                         requestSceneSelection(scene)
                     } label: {
@@ -84,12 +82,12 @@ struct SpeakView: View {
             .padding(.horizontal, 16)
             .padding(.top, 16)
 
-            if isLoading {
+            if sceneStore.isLoading {
                 ProgressView()
                     .padding(.top, 12)
             }
 
-            if let errorMessage {
+            if let errorMessage = actionErrorMessage ?? sceneStore.errorMessage {
                 Text(errorMessage)
                     .font(.footnote)
                     .foregroundStyle(.red)
@@ -112,10 +110,7 @@ struct SpeakView: View {
         )
         .navigationDestination(item: $selectedScene) { scene in
             SpeakSceneDetailView(scene: scene) { deletedScene in
-                scenes.removeAll { $0.id == deletedScene.id }
-                if scenes.isEmpty {
-                    scenes = SpeakSceneSeed.defaults
-                }
+                sceneStore.removeScene(id: deletedScene.id, userId: authManager.user?.id)
                 if selectedSceneId == deletedScene.id {
                     selectedSceneId = nil
                 }
@@ -157,6 +152,9 @@ struct SpeakView: View {
                 .presentationDragIndicator(.visible)
             }
         )
+        .refreshable {
+            await sceneStore.refresh(for: authManager.user?.id)
+        }
         .task {
             await loadScenesIfNeeded()
         }
@@ -165,6 +163,7 @@ struct SpeakView: View {
                 await loadScenesIfNeeded()
                 await completePendingActionsIfNeeded()
             }
+            actionErrorMessage = nil
             updateAddSceneAvailability()
             updateGenerateSceneAvailability()
             if isAddScenePresented {
@@ -201,26 +200,10 @@ struct SpeakView: View {
 
     @MainActor
     private func loadScenesIfNeeded() async {
-        guard let userId = authManager.user?.id else {
-            isLoading = false
-            errorMessage = nil
-            scenes = SpeakSceneSeed.defaults
-            return
-        }
-        guard !isLoading else { return }
-
-        isLoading = true
-        defer { isLoading = false }
-        errorMessage = nil
-
-        do {
-            let fetched = try await repository.fetchScenes(for: userId)
-            guard authManager.user?.id == userId else { return }
-            scenes = fetched.isEmpty ? SpeakSceneSeed.defaults : fetched
-        } catch {
-            guard authManager.user?.id == userId else { return }
-            errorMessage = "Unable to load scenes right now."
-            scenes = SpeakSceneSeed.defaults
+        await sceneStore.loadIfNeeded(for: authManager.user?.id)
+        if authManager.user == nil {
+            selectedSceneId = nil
+            selectedScene = nil
         }
     }
 
@@ -250,7 +233,7 @@ struct SpeakView: View {
         guard authManager.user != nil else { return }
 
         if let pendingSceneId {
-            if let scene = scenes.first(where: { $0.id == pendingSceneId }) {
+            if let scene = sceneStore.scenes.first(where: { $0.id == pendingSceneId }) {
                 selectedSceneId = scene.id
                 selectedScene = scene
             }
@@ -413,29 +396,32 @@ struct SpeakView: View {
     private func generateScene() async {
         guard !isGeneratingScene else { return }
         guard authManager.user != nil else {
-            errorMessage = "Please sign in to generate a scene."
+            actionErrorMessage = "Please sign in to generate a scene."
             return
         }
 
         isGeneratingScene = true
-        errorMessage = nil
+        actionErrorMessage = nil
         defer { isGeneratingScene = false }
 
         do {
-            let excludeIds = scenes.map { $0.id.uuidString }
+            let excludeIds = sceneStore.scenes.map { $0.id.uuidString }
             let generated = try await generationRepository.generateScenes(
                 count: 1,
                 excludeIds: Array(excludeIds.prefix(50))
             )
             guard let scene = generated.first else {
-                errorMessage = "No new scenes available right now."
+                actionErrorMessage = "No new scenes available right now."
                 return
             }
-            scenes = [scene] + scenes.filter { $0.id != scene.id }
+            if let userId = authManager.user?.id {
+                sceneStore.upsertScene(scene, userId: userId)
+            }
             selectedSceneId = scene.id
+            selectedScene = scene
             await cardStore.refresh(for: authManager.user?.id)
         } catch {
-            errorMessage = mapGenerateSceneError(error)
+            actionErrorMessage = mapGenerateSceneError(error)
         }
     }
 
@@ -453,7 +439,9 @@ struct SpeakView: View {
 
         do {
             let scene = try await creationRepository.createScene(prompt: prompt)
-            scenes = [scene] + scenes.filter { $0.id != scene.id }
+            if let userId = authManager.user?.id {
+                sceneStore.upsertScene(scene, userId: userId)
+            }
             await cardStore.refresh(for: authManager.user?.id)
             return true
         } catch {
@@ -519,4 +507,5 @@ struct SpeakView: View {
     )
         .environmentObject(AuthManager.shared)
         .environmentObject(FlashcardStore())
+        .environmentObject(SpeakSceneStore())
 }

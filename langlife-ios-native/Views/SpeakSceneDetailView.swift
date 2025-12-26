@@ -1,3 +1,4 @@
+import Auth
 import SwiftUI
 import UIKit
 
@@ -66,7 +67,7 @@ struct SpeakSceneDetailView: View {
         .task(id: scene.id) {
             speechService.reset()
             lastAutoPlayedStep = nil
-            await viewModel.loadOutline(scene: scene)
+            await viewModel.loadOutline(scene: scene, userId: authManager.user?.id)
         }
         .onChange(of: speechService.partialTranscript) { _, transcript in
             guard speechService.isRecording, let key = viewModel.activeSpeechKey else { return }
@@ -154,12 +155,12 @@ struct SpeakSceneDetailView: View {
                 } else if let outline = viewModel.outline {
                     OutlinePanel(outline: outline)
                 } else if let error = viewModel.outlineError {
-                    ErrorCard(message: error) {
-                        Task {
-                            await viewModel.loadOutline(scene: scene)
+                        ErrorCard(message: error) {
+                            Task {
+                                await viewModel.loadOutline(scene: scene, userId: authManager.user?.id)
+                            }
                         }
-                    }
-                } else {
+                    } else {
                     Text("Preparing the scene...")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -201,7 +202,7 @@ struct SpeakSceneDetailView: View {
                     } else if viewModel.outline == nil, let error = viewModel.outlineError {
                         ErrorCard(message: error) {
                             Task {
-                                await viewModel.loadOutline(scene: scene)
+                                await viewModel.loadOutline(scene: scene, userId: authManager.user?.id)
                             }
                         }
                     } else if viewModel.outline != nil {
@@ -1113,7 +1114,8 @@ private struct ErrorCard: View {
         title: "Order bubble tea",
         description: "Practice ordering a drink with sugar and ice preferences.",
         tags: [],
-        level: .beginner
+        level: .beginner,
+        createdAt: nil
     )) { _ in }
     .environmentObject(AuthManager.shared)
 }

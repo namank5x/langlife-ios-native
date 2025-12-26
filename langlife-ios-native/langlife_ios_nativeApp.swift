@@ -12,6 +12,7 @@ import SwiftUI
 struct langlife_ios_nativeApp: App {
     @StateObject private var authManager = AuthManager.shared
     @StateObject private var cardStore = FlashcardStore()
+    @StateObject private var sceneStore = SpeakSceneStore()
     @State private var signInPresenter: UIViewController?
 
     var body: some Scene {
@@ -19,6 +20,7 @@ struct langlife_ios_nativeApp: App {
             ContentView(signInPresenter: $signInPresenter)
                 .environmentObject(authManager)
                 .environmentObject(cardStore)
+                .environmentObject(sceneStore)
                 .tint(AppColors.accent)
                 .background(
                     SignInPresenter(presenter: $signInPresenter)

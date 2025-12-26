@@ -6,6 +6,8 @@ struct ShimmerModifier: ViewModifier {
     let animationDuration: Double
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.colorScheme) private var colorScheme
     @State private var startTime = Date()
 
     func body(content: Content) -> some View {
@@ -21,19 +23,21 @@ struct ShimmerModifier: ViewModifier {
                             let phase = elapsed.truncatingRemainder(dividingBy: animationDuration) / animationDuration
                             let travel = width + highlightWidth
                             let xOffset = (CGFloat(phase) * travel) - highlightWidth
+                            let shimmerColor = colorScheme == .dark ? Color.white : Color.black
+                            let opacities = shimmerOpacities()
                             ZStack(alignment: .leading) {
                                 LinearGradient(
                                     colors: [
-                                        .white.opacity(0.1),
-                                        .white.opacity(0.35),
-                                        .white.opacity(0.1),
+                                        shimmerColor.opacity(opacities.low),
+                                        shimmerColor.opacity(opacities.high),
+                                        shimmerColor.opacity(opacities.low),
                                     ],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                                 .frame(width: highlightWidth, height: height)
                                 .offset(x: xOffset)
-                                .blendMode(.plusLighter)
+                                .blendMode(colorScheme == .dark ? .plusLighter : .multiply)
                                 .compositingGroup()
                             }
                             .frame(width: width, height: height, alignment: .leading)
@@ -53,6 +57,14 @@ struct ShimmerModifier: ViewModifier {
                     startTime = Date()
                 }
             }
+    }
+
+    private func shimmerOpacities() -> (low: Double, high: Double) {
+        let isHighContrast = colorSchemeContrast == .increased
+        if colorScheme == .dark {
+            return (low: isHighContrast ? 0.18 : 0.12, high: isHighContrast ? 0.5 : 0.35)
+        }
+        return (low: isHighContrast ? 0.12 : 0.06, high: isHighContrast ? 0.32 : 0.18)
     }
 }
 

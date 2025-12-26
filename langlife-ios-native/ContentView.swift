@@ -116,4 +116,5 @@ struct ContentView: View {
     ContentView(signInPresenter: .constant(nil))
         .environmentObject(AuthManager.shared)
         .environmentObject(FlashcardStore())
+        .environmentObject(SpeakSceneStore())
 }
