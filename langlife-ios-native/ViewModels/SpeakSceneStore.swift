@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import os
 
 @MainActor
 final class SpeakSceneStore: ObservableObject {
@@ -12,6 +13,11 @@ final class SpeakSceneStore: ObservableObject {
     private var isRefreshing = false
     private let syncTTL: TimeInterval = 10 * 60
     private static let offlineMessage = "Offline. Sync will resume later."
+    private static let loadFailureMessage = "Could not load scenes right now."
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "langlife-ios-native",
+        category: "SpeakSceneStore"
+    )
 
     var isOfflineNotice: Bool {
         errorMessage == Self.offlineMessage
@@ -139,9 +145,11 @@ final class SpeakSceneStore: ObservableObject {
             let maxCreatedAt = fetchedScenes.compactMap(\.createdAt).max()
             updateSyncState(userId: userId, lastServerCreatedAt: maxCreatedAt)
         } catch {
-            errorMessage = error.isOffline
-                ? Self.offlineMessage
-                : "Could not load scenes right now."
+            if error.isCancelled {
+                return
+            }
+            Self.logger.error("Failed to refresh scenes: \(error.diagnosticDescription, privacy: .public)")
+            errorMessage = mapRefreshError(error)
             if scenes.isEmpty || scenes == SpeakSceneSeed.defaults {
                 loadCachedScenes(for: userId)
                 if scenes.isEmpty {
@@ -149,6 +157,18 @@ final class SpeakSceneStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func mapRefreshError(_ error: Error) -> String {
+        if error.isOffline {
+            return Self.offlineMessage
+        }
+
+        #if DEBUG
+        return "\(Self.loadFailureMessage) (\(error.diagnosticDescription))"
+        #else
+        return Self.loadFailureMessage
+        #endif
     }
 
     private func loadCachedScenes(for userId: UUID) {
