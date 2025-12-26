@@ -399,7 +399,7 @@ struct AddCardSheet: View {
                 return
             }
 
-            let pinyinText = generatePinyin(from: translated)
+            let pinyinText = translated.pinyinTranscription
             isApplyingTranslation = true
             chinese = translated
             pinyin = pinyinText
@@ -413,14 +413,6 @@ struct AddCardSheet: View {
         }
 
         isTranslating = false
-    }
-
-    private func generatePinyin(from chineseText: String) -> String {
-        let transformed = chineseText.applyingTransform(.toLatin, reverse: false) ?? ""
-        let cleaned = transformed
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned
     }
 
     private func runTranslationLoop(using session: TranslationSession) async {

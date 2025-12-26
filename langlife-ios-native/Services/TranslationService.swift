@@ -24,4 +24,14 @@ struct TranslationService {
         guard !translated.isEmpty else { throw TranslationServiceError.emptyResult }
         return translated
     }
+
+    static func translateTraditionalChineseToEnglish(
+        _ text: String,
+        session: TranslationSession
+    ) async throws -> String {
+        let response = try await session.translate(text)
+        let translated = response.targetText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        guard !translated.isEmpty else { throw TranslationServiceError.emptyResult }
+        return translated
+    }
 }

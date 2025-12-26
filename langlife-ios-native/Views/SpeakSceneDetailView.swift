@@ -1,5 +1,7 @@
 import Auth
 import SwiftUI
+import Translation
+import _Translation_SwiftUI
 import UIKit
 
 struct SpeakSceneDetailView: View {
@@ -10,6 +12,8 @@ struct SpeakSceneDetailView: View {
     @StateObject private var ttsService = TTSService()
     @StateObject private var speechService = SpeechInputService()
     @State private var revealedTranslations: Set<TranslationKey> = []
+    @State private var transcriptTranslations: [SpeechKey: TranscriptTranslation] = [:]
+    @State private var transcriptTranslationQueue = TranscriptTranslationQueue()
     @State private var isOutlinePresented = false
     @State private var isDeleteConfirmationPresented = false
     @State private var isDeletingScene = false
@@ -67,7 +71,12 @@ struct SpeakSceneDetailView: View {
         .task(id: scene.id) {
             speechService.reset()
             lastAutoPlayedStep = nil
+            transcriptTranslations = [:]
+            transcriptTranslationQueue = TranscriptTranslationQueue()
             await viewModel.loadOutline(scene: scene, userId: authManager.user?.id)
+        }
+        .onDisappear {
+            transcriptTranslationQueue.finish()
         }
         .onChange(of: speechService.partialTranscript) { _, transcript in
             guard speechService.isRecording, let key = viewModel.activeSpeechKey else { return }
@@ -79,6 +88,9 @@ struct SpeakSceneDetailView: View {
             guard let line = viewModel.line(for: key) else { return }
             Task {
                 await viewModel.finalizeSpeech(transcript: transcript, target: line.chinese, for: key)
+                if let resolvedTranscript = viewModel.speechAttempts[key]?.transcript {
+                    await queueTranscriptTranslation(for: key, transcript: resolvedTranscript)
+                }
             }
         }
         .onChange(of: speechService.errorMessage) { _, message in
@@ -121,6 +133,12 @@ struct SpeakSceneDetailView: View {
         }
         .onChange(of: reduceMotion) { _, _ in
             updateMicPulseState()
+        }
+        .translationTask(
+            source: Locale.Language(identifier: "zh-Hant"),
+            target: Locale.Language(identifier: "en")
+        ) { session in
+            await runTranscriptTranslationLoop(using: session)
         }
         .sheet(isPresented: $isOutlinePresented) {
             NavigationStack {
@@ -215,6 +233,7 @@ struct SpeakSceneDetailView: View {
                             activeTranscript: speechService.partialTranscript,
                             speechError: speechService.errorMessage,
                             ttsService: ttsService,
+                            transcriptTranslations: transcriptTranslations,
                             activeGlossSelection: $activeGlossSelection,
                             revealedTranslations: $revealedTranslations,
                             onGlossInteraction: {
@@ -374,6 +393,7 @@ struct SpeakSceneDetailView: View {
             ttsService.stop()
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
+        await resetTranscriptTranslation(for: target.key)
         viewModel.beginSpeech(for: target.key)
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
         if !started {
@@ -440,6 +460,7 @@ struct SpeakSceneDetailView: View {
             ttsService.stop()
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
+        await resetTranscriptTranslation(for: key)
         viewModel.beginSpeech(for: key)
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
         if !started {
@@ -492,6 +513,71 @@ struct SpeakSceneDetailView: View {
         guard !isMicPulseExpanded else { return }
         withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
             isMicPulseExpanded = true
+        }
+    }
+
+    @MainActor
+    private func resetTranscriptTranslation(for key: SpeechKey) {
+        transcriptTranslations.removeValue(forKey: key)
+    }
+
+    @MainActor
+    private func queueTranscriptTranslation(for key: SpeechKey, transcript: String) {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let existing = transcriptTranslations[key],
+           existing.transcript == trimmed,
+           existing.meaning != nil || existing.isTranslating {
+            return
+        }
+
+        transcriptTranslations[key] = TranscriptTranslation(
+            transcript: trimmed,
+            pinyin: trimmed.pinyinTranscription,
+            meaning: nil,
+            isTranslating: true,
+            error: nil
+        )
+        transcriptTranslationQueue.send(
+            TranscriptTranslationQueue.Request(key: key, transcript: trimmed)
+        )
+    }
+
+    private func runTranscriptTranslationLoop(using session: TranslationSession) async {
+        for await request in transcriptTranslationQueue.stream {
+            if Task.isCancelled { break }
+            await translateTranscript(request: request, session: session)
+        }
+    }
+
+    @MainActor
+    private func translateTranscript(
+        request: TranscriptTranslationQueue.Request,
+        session: TranslationSession
+    ) async {
+        guard let current = transcriptTranslations[request.key],
+              current.transcript == request.transcript else { return }
+
+        do {
+            let translated = try await TranslationService.translateTraditionalChineseToEnglish(
+                request.transcript,
+                session: session
+            )
+            guard !Task.isCancelled else { return }
+            guard var updated = transcriptTranslations[request.key],
+                  updated.transcript == request.transcript else { return }
+            updated.meaning = translated
+            updated.isTranslating = false
+            updated.error = nil
+            transcriptTranslations[request.key] = updated
+        } catch {
+            guard !Task.isCancelled else { return }
+            guard var updated = transcriptTranslations[request.key],
+                  updated.transcript == request.transcript else { return }
+            updated.isTranslating = false
+            updated.error = "Unable to translate right now."
+            transcriptTranslations[request.key] = updated
         }
     }
 }
@@ -559,6 +645,7 @@ private struct ConversationPanel: View {
     let activeTranscript: String
     let speechError: String?
     @ObservedObject var ttsService: TTSService
+    let transcriptTranslations: [SpeechKey: TranscriptTranslation]
     @Binding var activeGlossSelection: GlossSelection?
     @Binding var revealedTranslations: Set<TranslationKey>
     let onGlossInteraction: () -> Void
@@ -588,12 +675,21 @@ private struct ConversationPanel: View {
                         let speechTranscript = isActiveSpeech
                         ? (activeTranscript.isEmpty ? attempt?.transcript : activeTranscript)
                         : attempt?.transcript
+                        let trimmedTranscript = speechTranscript?
+                            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let translation = trimmedTranscript.isEmpty
+                            ? nil
+                            : transcriptTranslations[speechKey]
+                        let resolvedTranslation = translation?.transcript == trimmedTranscript
+                            ? translation
+                            : nil
                         let speechStatus = isActiveSpeech ? .listening : attempt?.status
                         ConversationBubble(
                             role: entry.role,
                             line: entry.line,
                             glossKey: speechKey,
                             speechTranscript: speechTranscript,
+                            speechTranslation: resolvedTranslation,
                             speechStatus: speechStatus,
                             speechScore: attempt?.score,
                             isTranslationVisible: revealedTranslations.contains(key),
@@ -670,6 +766,7 @@ private struct ConversationBubble: View {
     let line: SpeakLine
     let glossKey: SpeechKey
     let speechTranscript: String?
+    let speechTranslation: TranscriptTranslation?
     let speechStatus: SpeechAttemptStatus?
     let speechScore: Double?
     let isTranslationVisible: Bool
@@ -732,6 +829,42 @@ private struct ConversationBubble: View {
                         if let transcript = speechTranscript, !transcript.isEmpty {
                             Text(highlightedTranscript(transcript))
                                 .font(.body)
+
+                            if let speechTranslation {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if !speechTranslation.pinyin.isEmpty {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Pinyin")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Text(speechTranslation.pinyin)
+                                                .font(.callout)
+                                                .foregroundStyle(.secondary)
+                                                .accessibilityLabel("Pinyin, \(speechTranslation.pinyin)")
+                                        }
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Meaning")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if let meaning = speechTranslation.meaning, !meaning.isEmpty {
+                                            Text(meaning)
+                                                .font(.callout)
+                                                .foregroundStyle(.secondary)
+                                                .accessibilityLabel("Meaning, \(meaning)")
+                                        } else if speechTranslation.isTranslating {
+                                            Text("Translating...")
+                                                .font(.callout)
+                                                .foregroundStyle(.secondary)
+                                        } else if let error = speechTranslation.error {
+                                            Text(error)
+                                                .font(.callout)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
                         } else {
                             Text("Start speaking to compare your line.")
                                 .font(.body)
@@ -935,6 +1068,40 @@ private struct TranslationKey: Hashable {
 private struct GlossSelection: Hashable {
     let key: SpeechKey
     let tokenIndex: Int
+}
+
+private struct TranscriptTranslation: Equatable {
+    let transcript: String
+    let pinyin: String
+    var meaning: String?
+    var isTranslating: Bool
+    var error: String?
+}
+
+private final class TranscriptTranslationQueue {
+    struct Request {
+        let key: SpeechKey
+        let transcript: String
+    }
+
+    let stream: AsyncStream<Request>
+    private var continuation: AsyncStream<Request>.Continuation?
+
+    init() {
+        var localContinuation: AsyncStream<Request>.Continuation?
+        stream = AsyncStream { continuation in
+            localContinuation = continuation
+        }
+        continuation = localContinuation
+    }
+
+    func send(_ request: Request) {
+        continuation?.yield(request)
+    }
+
+    func finish() {
+        continuation?.finish()
+    }
 }
 
 private struct PinyinGlossView: View {
