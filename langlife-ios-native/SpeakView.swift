@@ -87,10 +87,15 @@ struct SpeakView: View {
                     .padding(.top, 12)
             }
 
-            if let errorMessage = actionErrorMessage ?? sceneStore.errorMessage {
-                Text(errorMessage)
+            if let actionErrorMessage {
+                Text(actionErrorMessage)
                     .font(.footnote)
                     .foregroundStyle(.red)
+                    .padding(.top, 8)
+            } else if let errorMessage = sceneStore.errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(sceneStore.isOfflineNotice ? Color.secondary : .red)
                     .padding(.top, 8)
             }
 

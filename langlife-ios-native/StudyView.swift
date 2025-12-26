@@ -65,6 +65,17 @@ struct StudyView: View {
         )
     }
 
+    private var combinedErrorMessage: String? {
+        reviewErrorMessage ?? cardStore.errorMessage
+    }
+
+    private var combinedErrorIsOffline: Bool {
+        if let reviewErrorMessage {
+            return reviewErrorMessage == FlashcardStore.offlineMessage
+        }
+        return cardStore.isOfflineNotice
+    }
+
     var body: some View {
         VStack {
             Spacer(minLength: 24)
@@ -160,17 +171,10 @@ struct StudyView: View {
                 .padding(.horizontal, 20)
             }
 
-            if let errorMessage = cardStore.errorMessage {
-                Text(errorMessage)
+            if let combinedErrorMessage {
+                Text(combinedErrorMessage)
                     .font(.footnote)
-                    .foregroundStyle(.red)
-                    .padding(.top, 12)
-            }
-
-            if let reviewErrorMessage {
-                Text(reviewErrorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(combinedErrorIsOffline ? Color.secondary : .red)
                     .padding(.top, 12)
             }
 
@@ -479,7 +483,9 @@ struct StudyView: View {
         do {
             try await cardStore.persistReview(updatedCard, userId: authManager.user?.id)
         } catch {
-            reviewErrorMessage = "Could not save progress. Please try again."
+            reviewErrorMessage = error.isOffline
+                ? FlashcardStore.offlineMessage
+                : "Could not save progress. Please try again."
         }
     }
 

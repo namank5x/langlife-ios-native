@@ -22,55 +22,58 @@ struct ManageCardsView: View {
     }
 
     var body: some View {
-        Group {
-            if authManager.user == nil {
-                VStack(spacing: 12) {
-                    Text("Sign in to manage your cards.")
-                        .font(.headline)
-                    Text("Your cards are tied to your account.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(24)
-            } else if cardStore.isLoading && cardStore.cards.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    if let errorMessage = cardStore.errorMessage {
-                        Section {
-                            Text(errorMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.red)
-                        }
-                    }
+        content
+            .navigationTitle("Cards")
+            .task {
+                await cardStore.loadIfNeeded(for: authManager.user?.id)
+            }
+    }
 
-                    if filteredCards.isEmpty {
-                        Section {
-                            Text(isSearching ? "No matching cards." : "No cards yet.")
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        ForEach(filteredCards) { card in
-                            NavigationLink {
-                                EditCardView(card: card)
-                            } label: {
-                                CardRow(card: card)
-                            }
-                        }
+    @ViewBuilder
+    private var content: some View {
+        if authManager.user == nil {
+            VStack(spacing: 12) {
+                Text("Sign in to manage your cards.")
+                    .font(.headline)
+                Text("Your cards are tied to your account.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(24)
+        } else if cardStore.isLoading && cardStore.cards.isEmpty {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                if let errorMessage = cardStore.errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(cardStore.isOfflineNotice ? Color.secondary : .red)
                     }
                 }
-                .listStyle(.insetGrouped)
-                .searchable(text: $searchText, prompt: "Search cards")
-                .refreshable {
-                    await cardStore.refresh(for: authManager.user?.id)
+
+                if filteredCards.isEmpty {
+                    Section {
+                        Text(isSearching ? "No matching cards." : "No cards yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(filteredCards) { card in
+                        NavigationLink {
+                            EditCardView(card: card)
+                        } label: {
+                            CardRow(card: card)
+                        }
+                    }
                 }
             }
-        }
-        .navigationTitle("Cards")
-        .task {
-            await cardStore.loadIfNeeded(for: authManager.user?.id)
+            .listStyle(.insetGrouped)
+            .searchable(text: $searchText, prompt: "Search cards")
+            .refreshable {
+                await cardStore.refresh(for: authManager.user?.id)
+            }
         }
     }
 }

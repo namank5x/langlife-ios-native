@@ -11,6 +11,11 @@ final class SpeakSceneStore: ObservableObject {
     private var lastLoadedUserId: UUID?
     private var isRefreshing = false
     private let syncTTL: TimeInterval = 10 * 60
+    private static let offlineMessage = "Offline. Sync will resume later."
+
+    var isOfflineNotice: Bool {
+        errorMessage == Self.offlineMessage
+    }
 
     func loadIfNeeded(for userId: UUID?) async {
         if isRefreshing, lastLoadedUserId == userId { return }
@@ -129,7 +134,9 @@ final class SpeakSceneStore: ObservableObject {
             let maxCreatedAt = fetchedScenes.compactMap(\.createdAt).max()
             updateSyncState(userId: userId, lastServerCreatedAt: maxCreatedAt)
         } catch {
-            errorMessage = "Could not load scenes. Showing local data instead."
+            errorMessage = error.isOffline
+                ? Self.offlineMessage
+                : "Could not load scenes right now."
             if scenes.isEmpty || scenes == SpeakSceneSeed.defaults {
                 loadCachedScenes(for: userId)
                 if scenes.isEmpty {

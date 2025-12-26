@@ -11,6 +11,11 @@ final class FlashcardStore: ObservableObject {
     private var lastLoadedUserId: UUID?
     private var isRefreshing = false
     private let syncTTL: TimeInterval = 10 * 60
+    static let offlineMessage = "Offline. Sync will resume later."
+
+    var isOfflineNotice: Bool {
+        errorMessage == Self.offlineMessage
+    }
 
     func loadIfNeeded(for userId: UUID?) async {
         if isRefreshing, lastLoadedUserId == userId { return }
@@ -207,7 +212,9 @@ final class FlashcardStore: ObservableObject {
             let maxCreatedAt = cards.compactMap(\.createdAt).max()
             updateSyncState(userId: userId, lastServerCreatedAt: maxCreatedAt)
         } catch {
-            errorMessage = "Could not load cards. Showing local data instead."
+            errorMessage = error.isOffline
+                ? Self.offlineMessage
+                : "Could not load cards right now."
             if cards.isEmpty {
                 loadCachedCards(for: userId)
                 if cards.isEmpty {
