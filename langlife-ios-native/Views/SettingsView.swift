@@ -28,7 +28,8 @@ struct SettingsView: View {
         return formatter
     }()
     private var manageSubscriptionURL: URL? {
-        subscriptionManager.customerInfo?.managementURL
+        guard subscriptionManager.isPro else { return nil }
+        return subscriptionManager.customerInfo?.managementURL
             ?? URL(string: "https://apps.apple.com/account/subscriptions")
     }
     var body: some View {
@@ -160,7 +161,7 @@ struct SettingsView: View {
                 handlePendingPaywallIfNeeded()
             }
             .task {
-                await subscriptionManager.refresh()
+                await subscriptionManager.refresh(fetchPolicy: .fetchCurrent)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

@@ -26,11 +26,11 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
-    func refresh() async {
+    func refresh(fetchPolicy: CacheFetchPolicy = .default) async {
         lastErrorMessage = nil
         do {
             offerings = try await Purchases.shared.offerings()
-            let info = try await Purchases.shared.customerInfo()
+            let info = try await Purchases.shared.customerInfo(fetchPolicy: fetchPolicy)
             apply(customerInfo: info)
         } catch {
             lastErrorMessage = error.localizedDescription

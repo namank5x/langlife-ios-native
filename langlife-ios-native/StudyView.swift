@@ -6,12 +6,14 @@
 //
 
 import Auth
+import RevenueCatUI
 import SwiftUI
 import UIKit
 
 struct StudyView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var cardStore: FlashcardStore
+    @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @Environment(\.scenePhase) private var scenePhase
     @Binding var signInPresenter: UIViewController?
     @Binding var isAddCardPresented: Bool
@@ -36,6 +38,9 @@ struct StudyView: View {
     @State private var pendingManageCards = false
     @State private var cardsCountSnapshot = 0
     @State private var queueUserId: UUID?
+    @State private var reviewActionCount = 0
+    @State private var reviewActionDayStart: Date?
+    @State private var isPaywallPresented = false
 
     @StateObject private var ttsService = TTSService()
 
@@ -74,6 +79,11 @@ struct StudyView: View {
             return reviewErrorMessage == FlashcardStore.offlineMessage
         }
         return cardStore.isOfflineNotice
+    }
+
+    private var isReviewLimitReached: Bool {
+        !subscriptionManager.isPro
+            && reviewActionCount >= SubscriptionLimits.freeDailyReviewLimit
     }
 
     var body: some View {
@@ -232,17 +242,25 @@ struct StudyView: View {
                 .presentationDragIndicator(.visible)
             }
         )
+        .sheet(isPresented: $isPaywallPresented) {
+            PaywallView()
+        }
         .navigationDestination(isPresented: $isManageCardsPresented) {
             ManageCardsView()
         }
         .task {
             await loadCardIfNeeded()
+            refreshDailyReviewCountIfNeeded()
         }
         .onAppear {
             updateAddCardAvailability()
+            refreshDailyReviewCountIfNeeded()
         }
         .onChange(of: scenePhase) { _ in
             startPendingSignInIfPossible()
+            if scenePhase == .active {
+                refreshDailyReviewCountIfNeeded()
+            }
         }
         .onChange(of: cardStore.isLoading) { _, _ in
             updateAddCardAvailability()
@@ -279,6 +297,9 @@ struct StudyView: View {
             if isAddCardPresented {
                 addCardError = authManager.user == nil ? "Please sign in to add a card." : nil
             }
+            reviewActionCount = 0
+            reviewActionDayStart = nil
+            refreshDailyReviewCountIfNeeded()
         }
         .onChange(of: cardStore.cards) { _, newValue in
             syncQueue(with: newValue)
@@ -288,12 +309,20 @@ struct StudyView: View {
         }
     }
 
+    @MainActor
     private func requestRating(_ rating: Rating) {
         guard !isSigningIn else { return }
         guard authManager.user != nil else {
             setPendingRating(rating)
             presentSignInOptions()
             return
+        }
+        if isLimitedRating(rating) {
+            refreshDailyReviewCountIfNeeded()
+            guard !isReviewLimitReached else {
+                isPaywallPresented = true
+                return
+            }
         }
         handleRate(rating)
     }
@@ -307,7 +336,7 @@ struct StudyView: View {
                 return
             }
             clearPendingRating()
-            handleRate(rating)
+            requestRating(rating)
             return
         }
 
@@ -517,6 +546,7 @@ struct StudyView: View {
         isRevealed = true
     }
 
+    @MainActor
     private func handleRate(_ rating: Rating) {
         guard let card = currentCard else { return }
 
@@ -538,6 +568,14 @@ struct StudyView: View {
 
         isRevealed = false
         reviewErrorMessage = nil
+        if !subscriptionManager.isPro, isLimitedRating(rating), let userId = authManager.user?.id {
+            let dayStart = Calendar.current.startOfDay(for: Date())
+            reviewActionCount = LocalReviewLimitStore.incrementCount(
+                userId: userId,
+                dayStart: dayStart
+            )
+            reviewActionDayStart = dayStart
+        }
         Task {
             await persistReview(updatedCard)
         }
@@ -603,6 +641,24 @@ struct StudyView: View {
             addCardError = "Could not save this card. Please try again."
             return false
         }
+    }
+
+    @MainActor
+    private func refreshDailyReviewCountIfNeeded() {
+        guard let userId = authManager.user?.id else {
+            reviewActionCount = 0
+            reviewActionDayStart = nil
+            return
+        }
+
+        let dayStart = Calendar.current.startOfDay(for: Date())
+        if reviewActionDayStart == dayStart { return }
+        reviewActionCount = LocalReviewLimitStore.loadCount(userId: userId, dayStart: dayStart)
+        reviewActionDayStart = dayStart
+    }
+
+    private func isLimitedRating(_ rating: Rating) -> Bool {
+        rating == .again || rating == .good
     }
 }
 
