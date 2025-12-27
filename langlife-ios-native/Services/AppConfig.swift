@@ -30,6 +30,13 @@ enum AppConfig {
         return value
     }
 
+    static var revenueCatAPIKey: String {
+        guard let value = SupabaseConfig["REVENUECAT_API_KEY"], !value.isEmpty else {
+            preconditionFailure("Missing REVENUECAT_API_KEY in app configuration")
+        }
+        return value
+    }
+
     private static func validatedURL(for key: String) -> URL {
         guard let value = SupabaseConfig[key], !value.isEmpty else {
             preconditionFailure("Missing \(key) in app configuration")

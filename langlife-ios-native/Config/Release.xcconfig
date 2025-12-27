@@ -8,3 +8,4 @@ API_HOST_AND_PORT = www.langlife.app
 GOOGLE_IOS_CLIENT_ID = 1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4.apps.googleusercontent.com
 GOOGLE_SERVER_CLIENT_ID = 1075777048946-9do35ss4b3amla5v0t29danllgimvl7i.apps.googleusercontent.com
 GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.1075777048946-78p33gj4kkoin5kon3gr362tqgdhg3e4
+REVENUECAT_API_KEY = dum-key

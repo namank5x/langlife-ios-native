@@ -1,11 +1,14 @@
 import Auth
 import GoogleSignIn
+import RevenueCat
+import RevenueCatUI
 import SwiftUI
 import UIKit
 
 struct SettingsView: View {
 
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
@@ -17,6 +20,17 @@ struct SettingsView: View {
     @State private var pendingSignInProvider: SignInProvider?
     @State private var shouldStartSignIn = false
     @State private var errorMessage: String?
+    @State private var isPaywallPresented = false
+    @State private var pendingPaywallPresentation = false
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter
+    }()
+    private var manageSubscriptionURL: URL? {
+        subscriptionManager.customerInfo?.managementURL
+            ?? URL(string: "https://apps.apple.com/account/subscriptions")
+    }
     var body: some View {
         NavigationStack {
             List {
@@ -53,6 +67,61 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
+
+                if authManager.user != nil {
+                    Section("Subscription") {
+                        HStack {
+                            Text("Lang Life Pro")
+                            Spacer()
+                            Text(subscriptionManager.isPro ? "Active" : "Not active")
+                                .font(.subheadline)
+                                .foregroundStyle(subscriptionManager.isPro ? .green : .secondary)
+                        }
+
+                        if subscriptionManager.isPro, let planLabel = subscriptionManager.activePlanLabel {
+                            HStack {
+                                Text("Plan")
+                                Spacer()
+                                Text(planLabel)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if subscriptionManager.isPro,
+                           let expiration = subscriptionManager.activePlanExpiration {
+                            HStack {
+                                Text("Renews on")
+                                Spacer()
+                                Text(dateFormatter.string(from: expiration))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if !subscriptionManager.isPro {
+                            Button("Buy Pro") {
+                                presentPaywall()
+                            }
+                        }
+
+                        if let managementURL = manageSubscriptionURL {
+                            Link("Manage in App Store", destination: managementURL)
+                        }
+
+                        Button("Restore Purchases") {
+                            Task {
+                                await subscriptionManager.restore()
+                            }
+                        }
+
+                        if let subscriptionError = subscriptionManager.lastErrorMessage {
+                            Text(subscriptionError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
             }
             .navigationTitle("Settings")
             .background(
@@ -64,6 +133,9 @@ struct SettingsView: View {
             .sheet(
                 isPresented: $isSignInOptionsPresented,
                 onDismiss: {
+                    if pendingSignInProvider == nil {
+                        pendingPaywallPresentation = false
+                    }
                     shouldStartSignIn = pendingSignInProvider != nil
                     startPendingSignInIfPossible()
                 },
@@ -78,8 +150,17 @@ struct SettingsView: View {
                 .presentationDragIndicator(.visible)
             }
             )
+            .sheet(isPresented: $isPaywallPresented) {
+                PaywallView()
+            }
             .onChange(of: scenePhase) { _ in
                 startPendingSignInIfPossible()
+            }
+            .onChange(of: authManager.user?.id) { _, _ in
+                handlePendingPaywallIfNeeded()
+            }
+            .task {
+                await subscriptionManager.refresh()
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -102,6 +183,7 @@ struct SettingsView: View {
             try await authManager.signInWithApple()
         } catch {
             errorMessage = error.localizedDescription
+            pendingPaywallPresentation = false
         }
     }
 
@@ -128,9 +210,11 @@ struct SettingsView: View {
         } catch {
             isSigningIn = false
             if isGoogleSignInCancelled(error) {
+                pendingPaywallPresentation = false
                 return
             }
             errorMessage = error.localizedDescription
+            pendingPaywallPresentation = false
         }
     }
 
@@ -147,6 +231,21 @@ struct SettingsView: View {
         case .google:
             await signInWithGoogle()
         }
+    }
+
+    private func presentPaywall() {
+        guard authManager.user == nil else {
+            isPaywallPresented = true
+            return
+        }
+        pendingPaywallPresentation = true
+        isSignInOptionsPresented = true
+    }
+
+    private func handlePendingPaywallIfNeeded() {
+        guard pendingPaywallPresentation, authManager.user != nil else { return }
+        pendingPaywallPresentation = false
+        isPaywallPresented = true
     }
 
     private func startPendingSignInIfPossible() {
@@ -210,4 +309,5 @@ struct SettingsView: View {
 #Preview {
     SettingsView(signInPresenter: .constant(nil))
         .environmentObject(AuthManager.shared)
+        .environmentObject(SubscriptionManager.shared)
 }

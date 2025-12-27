@@ -11,6 +11,8 @@
 		B6A0A1B2C3D4E5F607182930 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408BE /* GoogleSignIn */; };
 		B6A0A1B2C3D4E5F607182931 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408BF /* GoogleSignInSwift */; };
 		B6A0A1B2C3D4E5F607182932 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408C0 /* GRDB */; };
+		B6A0A1B2C3D4E5F607182933 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408C1 /* RevenueCat */; };
+		B6A0A1B2C3D4E5F607182934 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 82E868B8DA6849DC958408C2 /* RevenueCatUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +37,8 @@
 				B6A0A1B2C3D4E5F607182930 /* GoogleSignIn in Frameworks */,
 				B6A0A1B2C3D4E5F607182931 /* GoogleSignInSwift in Frameworks */,
 				B6A0A1B2C3D4E5F607182932 /* GRDB in Frameworks */,
+				B6A0A1B2C3D4E5F607182933 /* RevenueCat in Frameworks */,
+				B6A0A1B2C3D4E5F607182934 /* RevenueCatUI in Frameworks */,
 				B630F3832D4C4223871EC1A4 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -91,6 +95,8 @@
 				82E868B8DA6849DC958408BE /* GoogleSignIn */,
 				82E868B8DA6849DC958408BF /* GoogleSignInSwift */,
 				82E868B8DA6849DC958408C0 /* GRDB */,
+				82E868B8DA6849DC958408C1 /* RevenueCat */,
+				82E868B8DA6849DC958408C2 /* RevenueCatUI */,
 				82E868B8DA6849DC958408BD /* Supabase */,
 			);
 			productName = "langlife-ios-native";
@@ -124,6 +130,7 @@
 			packageReferences = (
 				F388653F0675420EBF18A5BA /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 				F388653F0675420EBF18A5BB /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				F388653F0675420EBF18A5BC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				F388653F0675420EBF18A5B9 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -394,6 +401,14 @@
 				minimumVersion = 6.0.0;
 			};
 		};
+		F388653F0675420EBF18A5BC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -416,6 +431,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F388653F0675420EBF18A5BB /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
+		};
+		82E868B8DA6849DC958408C1 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F388653F0675420EBF18A5BC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		82E868B8DA6849DC958408C2 /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F388653F0675420EBF18A5BC /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

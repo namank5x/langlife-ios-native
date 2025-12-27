@@ -7,6 +7,7 @@
 
 import Auth
 import Foundation
+import RevenueCatUI
 import SwiftUI
 import UIKit
 
@@ -14,6 +15,7 @@ struct SpeakView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var cardStore: FlashcardStore
     @EnvironmentObject private var sceneStore: SpeakSceneStore
+    @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @Environment(\.scenePhase) private var scenePhase
     @Binding var signInPresenter: UIViewController?
     @Binding var generateRequestID: UUID
@@ -36,9 +38,17 @@ struct SpeakView: View {
     @State private var pendingSceneId: UUID?
     @State private var pendingAddScene = false
     @State private var pendingGenerateScene = false
+    @State private var isPaywallPresented = false
 
     private let creationRepository = SpeakSceneCreationRepository()
     private let generationRepository = SpeakSceneGenerationRepository()
+    private var isSceneLimitReached: Bool {
+        !subscriptionManager.isPro
+            && sceneStore.scenes.count >= SubscriptionLimits.freeSceneLimit
+    }
+    private var sceneLimitMessage: String {
+        "Free plan includes up to \(SubscriptionLimits.freeSceneLimit) scenes. Upgrade to Lang Life Pro to add more."
+    }
 
     var body: some View {
         ScrollView {
@@ -157,6 +167,9 @@ struct SpeakView: View {
                 .presentationDragIndicator(.visible)
             }
         )
+        .sheet(isPresented: $isPaywallPresented) {
+            PaywallView()
+        }
         .refreshable {
             await sceneStore.refresh(for: authManager.user?.id)
         }
@@ -204,6 +217,12 @@ struct SpeakView: View {
                 presentSignInOptions()
                 return
             }
+            guard !isSceneLimitReached else {
+                isAddScenePresented = false
+                actionErrorMessage = sceneLimitMessage
+                isPaywallPresented = true
+                return
+            }
             addSceneError = nil
         }
     }
@@ -236,6 +255,11 @@ struct SpeakView: View {
             presentSignInOptions()
             return
         }
+        guard !isSceneLimitReached else {
+            actionErrorMessage = sceneLimitMessage
+            isPaywallPresented = true
+            return
+        }
         Task {
             await generateScene()
         }
@@ -262,6 +286,11 @@ struct SpeakView: View {
 
         if pendingGenerateScene {
             pendingGenerateScene = false
+            guard !isSceneLimitReached else {
+                actionErrorMessage = sceneLimitMessage
+                isPaywallPresented = true
+                return
+            }
             await generateScene()
         }
     }
@@ -412,6 +441,11 @@ struct SpeakView: View {
             actionErrorMessage = "Please sign in to generate a scene."
             return
         }
+        guard !isSceneLimitReached else {
+            actionErrorMessage = sceneLimitMessage
+            isPaywallPresented = true
+            return
+        }
 
         isGeneratingScene = true
         actionErrorMessage = nil
@@ -446,6 +480,11 @@ struct SpeakView: View {
         guard !isCreatingScene else { return false }
         guard authManager.user != nil else {
             addSceneError = "Please sign in to add a scene."
+            return false
+        }
+        guard !isSceneLimitReached else {
+            addSceneError = sceneLimitMessage
+            isPaywallPresented = true
             return false
         }
 
@@ -534,4 +573,5 @@ struct SpeakView: View {
         .environmentObject(AuthManager.shared)
         .environmentObject(FlashcardStore())
         .environmentObject(SpeakSceneStore())
+        .environmentObject(SubscriptionManager.shared)
 }

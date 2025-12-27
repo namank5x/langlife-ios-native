@@ -117,4 +117,5 @@ struct ContentView: View {
         .environmentObject(AuthManager.shared)
         .environmentObject(FlashcardStore())
         .environmentObject(SpeakSceneStore())
+        .environmentObject(SubscriptionManager.shared)
 }
