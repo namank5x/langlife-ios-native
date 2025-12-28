@@ -12,8 +12,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("onboardingVersionSeen") private var onboardingVersionSeen = 0
-
     @Binding var signInPresenter: UIViewController?
 
     @State private var localSignInPresenter: UIViewController?
@@ -26,6 +24,7 @@ struct SettingsView: View {
     @State private var pendingPaywallPresentation = false
     @State private var supportMailDraft: SupportMailDraft?
     @State private var supportErrorMessage: String?
+    @State private var isOnboardingPresented = false
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -142,8 +141,7 @@ struct SettingsView: View {
                     }
 
                     Button("How it works") {
-                        onboardingVersionSeen = 0
-                        dismiss()
+                        isOnboardingPresented = true
                     }
 
                     if let supportErrorMessage {
@@ -182,6 +180,11 @@ struct SettingsView: View {
             )
             .sheet(isPresented: $isPaywallPresented) {
                 PaywallScreen()
+            }
+            .fullScreenCover(isPresented: $isOnboardingPresented) {
+                OnboardingView {
+                    isOnboardingPresented = false
+                }
             }
             .sheet(item: $supportMailDraft) { draft in
                 MailComposeView(
