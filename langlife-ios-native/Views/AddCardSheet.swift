@@ -85,6 +85,7 @@ struct AddCardSheet: View {
     }
 
     private var duplicateMessage: String? {
+        guard !isSaving, !isDeleting else { return nil }
         guard !trimmedChinese.isEmpty,
               !trimmedPinyin.isEmpty,
               !trimmedEnglish.isEmpty else {
