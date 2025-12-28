@@ -2,7 +2,6 @@ import Auth
 import GoogleSignIn
 import MessageUI
 import RevenueCat
-import RevenueCatUI
 import SwiftUI
 import UIKit
 
@@ -176,7 +175,7 @@ struct SettingsView: View {
             }
             )
             .sheet(isPresented: $isPaywallPresented) {
-                PaywallView()
+                PaywallScreen()
             }
             .sheet(item: $supportMailDraft) { draft in
                 MailComposeView(
@@ -195,7 +194,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .onChange(of: scenePhase) { _ in
+            .onChange(of: scenePhase) { _, _ in
                 startPendingSignInIfPossible()
             }
             .onChange(of: authManager.user?.id) { _, _ in

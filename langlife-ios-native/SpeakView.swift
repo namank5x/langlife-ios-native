@@ -7,7 +7,6 @@
 
 import Auth
 import Foundation
-import RevenueCatUI
 import SwiftUI
 import UIKit
 
@@ -168,7 +167,7 @@ struct SpeakView: View {
             }
         )
         .sheet(isPresented: $isPaywallPresented) {
-            PaywallView()
+            PaywallScreen()
         }
         .refreshable {
             await sceneStore.refresh(for: authManager.user?.id)

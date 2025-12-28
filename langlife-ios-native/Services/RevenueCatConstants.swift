@@ -4,11 +4,11 @@ enum RevenueCatConstants {
 
     enum ProductID {
         static let monthly = "monthly"
-        static let yearly = "yearly"
+        static let weekly = "subscription_weekly"
     }
 
     enum PackageID {
         static let monthly = "monthly"
-        static let yearly = "yearly"
+        static let weekly = "weekly"
     }
 }

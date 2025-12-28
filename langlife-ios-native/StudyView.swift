@@ -6,7 +6,6 @@
 //
 
 import Auth
-import RevenueCatUI
 import SwiftUI
 import UIKit
 
@@ -243,7 +242,7 @@ struct StudyView: View {
             }
         )
         .sheet(isPresented: $isPaywallPresented) {
-            PaywallView()
+            PaywallScreen()
         }
         .navigationDestination(isPresented: $isManageCardsPresented) {
             ManageCardsView()

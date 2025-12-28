@@ -93,8 +93,8 @@ final class SubscriptionManager: ObservableObject {
         switch productId {
         case RevenueCatConstants.ProductID.monthly:
             return "Monthly"
-        case RevenueCatConstants.ProductID.yearly:
-            return "Yearly"
+        case RevenueCatConstants.ProductID.weekly:
+            return "Weekly"
         default:
             return "Unknown"
         }
