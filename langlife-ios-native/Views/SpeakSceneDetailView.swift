@@ -7,6 +7,7 @@ import UIKit
 struct SpeakSceneDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var authManager: AuthManager
     @StateObject private var viewModel = SpeakSceneDetailViewModel()
     @StateObject private var ttsService = TTSService()
@@ -93,8 +94,8 @@ struct SpeakSceneDetailView: View {
                 }
             }
         }
-        .onChange(of: speechService.errorMessage) { _, message in
-            guard message != nil, let key = viewModel.activeSpeechKey else { return }
+        .onChange(of: speechService.issue) { _, issue in
+            guard issue != nil, let key = viewModel.activeSpeechKey else { return }
             viewModel.cancelSpeech(for: key)
         }
         .onChange(of: viewModel.latestLoadedTurnStep) { _, step in
@@ -133,6 +134,10 @@ struct SpeakSceneDetailView: View {
         }
         .onChange(of: reduceMotion) { _, _ in
             updateMicPulseState()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            speechService.refreshAuthorizationState()
         }
         .translationTask(
             source: Locale.Language(identifier: "zh-Hant"),
@@ -231,7 +236,7 @@ struct SpeakSceneDetailView: View {
                             speechAttempts: viewModel.speechAttempts,
                             activeSpeechKey: viewModel.activeSpeechKey,
                             activeTranscript: speechService.partialTranscript,
-                            speechError: speechService.errorMessage,
+                            speechIssue: speechService.issue,
                             ttsService: ttsService,
                             transcriptTranslations: transcriptTranslations,
                             activeGlossSelection: $activeGlossSelection,
@@ -643,7 +648,7 @@ private struct ConversationPanel: View {
     let speechAttempts: [SpeechKey: SpeechAttempt]
     let activeSpeechKey: SpeechKey?
     let activeTranscript: String
-    let speechError: String?
+    let speechIssue: SpeechInputIssue?
     @ObservedObject var ttsService: TTSService
     let transcriptTranslations: [SpeechKey: TranscriptTranslation]
     @Binding var activeGlossSelection: GlossSelection?
@@ -732,8 +737,12 @@ private struct ConversationPanel: View {
                 ErrorCard(message: turnError, actionTitle: "Try again", onAction: onNext)
             }
 
-            if let speechError {
-                ErrorCard(message: speechError, actionTitle: "Dismiss", onAction: onDismissSpeechError)
+            if let speechIssue {
+                if speechIssue.isPermission {
+                    SpeechPermissionCard(issue: speechIssue, onDismiss: onDismissSpeechError)
+                } else {
+                    ErrorCard(message: speechIssue.message, actionTitle: "Dismiss", onAction: onDismissSpeechError)
+                }
             }
             Color.clear
                 .frame(height: bottomSpacerHeight)
@@ -1289,6 +1298,52 @@ private struct ErrorCard: View {
         .frame(maxWidth: .infinity)
         .padding(16)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct SpeechPermissionCard: View {
+    @Environment(\.openURL) private var openURL
+    let issue: SpeechInputIssue
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: issue.iconName)
+                    .font(.title3)
+                    .foregroundStyle(AppColors.accent)
+
+                Text(issue.title)
+                    .font(.headline)
+            }
+
+            Text(issue.message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                if issue.showsSettingsAction {
+                    Button("Open Settings") {
+                        openSettings()
+                    }
+                    .neutralProminentButton()
+                }
+
+                Button(issue.showsSettingsAction ? "Not now" : "Dismiss") {
+                    onDismiss()
+                }
+                .buttonStyle(.bordered)
+            }
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
     }
 }
 

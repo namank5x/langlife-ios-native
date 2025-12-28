@@ -8,7 +8,7 @@ final class SpeechInputService: NSObject, ObservableObject {
     @Published private(set) var transcript = ""
     @Published private(set) var partialTranscript = ""
     @Published private(set) var finalTranscript: String?
-    @Published private(set) var errorMessage: String?
+    @Published private(set) var issue: SpeechInputIssue?
     @Published private(set) var authorizationStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
 
     private let audioEngine = AVAudioEngine()
@@ -39,7 +39,7 @@ final class SpeechInputService: NSObject, ObservableObject {
             return true
         }
 
-        errorMessage = nil
+        issue = nil
         transcript = ""
         partialTranscript = ""
         finalTranscript = nil
@@ -47,23 +47,23 @@ final class SpeechInputService: NSObject, ObservableObject {
 
         let status = await requestAuthorization()
         guard status == .authorized else {
-            errorMessage = "Enable speech recognition and microphone access in Settings to practice speaking."
+            issue = issueForSpeechAuthorization(status)
             return false
         }
 
         let hasMicAccess = await requestRecordPermission()
         guard hasMicAccess else {
-            errorMessage = "Enable microphone access in Settings to practice speaking."
+            issue = issueForMicrophonePermission()
             return false
         }
 
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
-            errorMessage = "Speech recognition is unavailable for this language."
+            issue = .unavailable("Speech recognition is unavailable for this language.")
             return false
         }
 
         guard recognizer.isAvailable else {
-            errorMessage = "Speech recognition is unavailable right now."
+            issue = .unavailable("Speech recognition is unavailable right now.")
             return false
         }
 
@@ -92,7 +92,7 @@ final class SpeechInputService: NSObject, ObservableObject {
                     options: [.duckOthers, .defaultToSpeaker]
                 )
             } catch {
-                errorMessage = "Could not start the microphone."
+                issue = .failure("Could not start the microphone.")
                 return false
             }
         }
@@ -103,13 +103,13 @@ final class SpeechInputService: NSObject, ObservableObject {
         do {
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            errorMessage = "Could not start the microphone."
+            issue = .failure("Could not start the microphone.")
             return false
         }
 
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
         guard let recognitionRequest else {
-            errorMessage = "Could not start speech recognition."
+            issue = .failure("Could not start speech recognition.")
             return false
         }
 
@@ -141,7 +141,7 @@ final class SpeechInputService: NSObject, ObservableObject {
                 }
 
                 if error != nil {
-                    self.errorMessage = "We couldn't understand that. Try again."
+                    self.issue = .failure("We couldn't understand that. Try again.")
                     self.stopRecording()
                 }
             }
@@ -154,7 +154,7 @@ final class SpeechInputService: NSObject, ObservableObject {
         }
         let recordingFormat = inputNode.inputFormat(forBus: 0)
         guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
-            errorMessage = "Microphone unavailable right now. Try again."
+            issue = .failure("Microphone unavailable right now. Try again.")
             stopRecording()
             return false
         }
@@ -166,7 +166,7 @@ final class SpeechInputService: NSObject, ObservableObject {
         do {
             try audioEngine.start()
         } catch {
-            errorMessage = "Could not start recording."
+            issue = .failure("Could not start recording.")
             stopRecording()
             return false
         }
@@ -222,12 +222,31 @@ final class SpeechInputService: NSObject, ObservableObject {
         transcript = ""
         partialTranscript = ""
         finalTranscript = nil
-        errorMessage = nil
+        issue = nil
         lastNonEmptyTranscript = ""
     }
 
     func clearError() {
-        errorMessage = nil
+        issue = nil
+    }
+
+    func refreshAuthorizationState() {
+        let speechStatus = SFSpeechRecognizer.authorizationStatus()
+        authorizationStatus = speechStatus
+
+        guard issue == nil || issue?.isPermission == true else { return }
+        if let speechIssue = issueForSpeechAuthorization(speechStatus) {
+            issue = speechIssue
+            return
+        }
+
+        let micPermission = AVAudioSession.sharedInstance().recordPermission
+        if let micIssue = issueForMicrophonePermission(micPermission) {
+            issue = micIssue
+            return
+        }
+
+        issue = nil
     }
 
     private func bestAvailableTranscript() -> String? {
@@ -252,5 +271,104 @@ final class SpeechInputService: NSObject, ObservableObject {
         }
 
         return nil
+    }
+
+    private func issueForSpeechAuthorization(
+        _ status: SFSpeechRecognizerAuthorizationStatus
+    ) -> SpeechInputIssue? {
+        switch status {
+        case .authorized:
+            return nil
+        case .denied:
+            return .permissionDenied(.speechRecognition)
+        case .restricted:
+            return .permissionRestricted(.speechRecognition)
+        case .notDetermined:
+            return nil
+        @unknown default:
+            return .failure("Speech recognition is unavailable right now.")
+        }
+    }
+
+    private func issueForMicrophonePermission(
+        _ permission: AVAudioSession.RecordPermission? = nil
+    ) -> SpeechInputIssue? {
+        let resolved = permission ?? AVAudioSession.sharedInstance().recordPermission
+        switch resolved {
+        case .granted:
+            return nil
+        case .denied:
+            return .permissionDenied(.microphone)
+        case .undetermined:
+            return nil
+        @unknown default:
+            return .failure("Microphone access is unavailable right now.")
+        }
+    }
+}
+
+enum SpeechPermissionKind: String, Equatable {
+    case speechRecognition = "Speech Recognition"
+    case microphone = "Microphone"
+}
+
+enum SpeechInputIssue: Equatable {
+    case permissionDenied(SpeechPermissionKind)
+    case permissionRestricted(SpeechPermissionKind)
+    case unavailable(String)
+    case failure(String)
+
+    var message: String {
+        switch self {
+        case .permissionDenied(let kind):
+            return "To practice speaking, allow \(kind.rawValue) in Settings."
+        case .permissionRestricted(let kind):
+            return "\(kind.rawValue) access is restricted on this device."
+        case .unavailable(let message),
+             .failure(let message):
+            return message
+        }
+    }
+
+    var showsSettingsAction: Bool {
+        switch self {
+        case .permissionDenied:
+            return true
+        case .permissionRestricted, .unavailable, .failure:
+            return false
+        }
+    }
+
+    var isPermission: Bool {
+        switch self {
+        case .permissionDenied, .permissionRestricted:
+            return true
+        case .unavailable, .failure:
+            return false
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .permissionDenied(.microphone), .permissionRestricted(.microphone):
+            return "mic.slash.fill"
+        case .permissionDenied(.speechRecognition), .permissionRestricted(.speechRecognition):
+            return "waveform.slash"
+        case .unavailable:
+            return "waveform"
+        case .failure:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .permissionDenied(let kind), .permissionRestricted(let kind):
+            return "\(kind.rawValue) needed"
+        case .unavailable:
+            return "Speech unavailable"
+        case .failure:
+            return "Speech error"
+        }
     }
 }
