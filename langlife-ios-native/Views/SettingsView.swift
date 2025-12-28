@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("onboardingVersionSeen") private var onboardingVersionSeen = 0
 
     @Binding var signInPresenter: UIViewController?
 
@@ -138,6 +139,11 @@ struct SettingsView: View {
                 Section("Support") {
                     Button("Contact Support") {
                         contactSupport()
+                    }
+
+                    Button("How it works") {
+                        onboardingVersionSeen = 0
+                        dismiss()
                     }
 
                     if let supportErrorMessage {

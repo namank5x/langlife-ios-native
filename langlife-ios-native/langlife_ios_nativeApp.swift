@@ -32,7 +32,7 @@ struct langlife_ios_nativeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(signInPresenter: $signInPresenter)
+            RootView(signInPresenter: $signInPresenter)
                 .environmentObject(authManager)
                 .environmentObject(cardStore)
                 .environmentObject(sceneStore)
