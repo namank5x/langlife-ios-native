@@ -30,6 +30,8 @@
 	<string>$(GOOGLE_SERVER_CLIENT_ID)</string>
 	<key>REVENUECAT_API_KEY</key>
 	<string>$(REVENUECAT_API_KEY)</string>
+	<key>SUPPORT_EMAIL</key>
+	<string>support@wovenlabs.net</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We use the microphone so you can practice speaking the scene lines.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
