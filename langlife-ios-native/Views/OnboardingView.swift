@@ -164,7 +164,9 @@ private struct ImmersionHero: View {
 
             HStack {
                 ChatBubble(
-                    text: "Welcome to the cafe. Ready to order?",
+                    english: "How are you?",
+                    mandarin: "你好嗎？",
+                    pinyin: "nǐ hǎo ma?",
                     isAccent: true
                 )
                 Spacer(minLength: 16)
@@ -173,7 +175,9 @@ private struct ImmersionHero: View {
             HStack {
                 Spacer(minLength: 16)
                 ChatBubble(
-                    text: "Yes, a bubble tea with less ice.",
+                    english: "I'm good, thanks.",
+                    mandarin: "我很好，謝謝。",
+                    pinyin: "wǒ hěn hǎo, xiè xiè.",
                     isAccent: false
                 )
             }
@@ -213,19 +217,33 @@ private struct SceneGeneratorHero: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
 
-            Text("Order bubble tea with less ice")
+            Text("Ask for some water")
                 .font(.system(size: 18, weight: .semibold, design: .rounded))
 
             Divider()
 
-            Text(
-                didGenerate
-                    ? "AI: What size would you like?\nYou: Medium, less ice."
-                    : "Tap generate to preview the scene."
-            )
-            .font(.system(size: 15, weight: .medium, design: .rounded))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if didGenerate {
+                VStack(alignment: .leading, spacing: 10) {
+                    TranscriptLine(
+                        speaker: "You",
+                        english: "Can I have some water please",
+                        mandarin: "可以給我一些水嗎？",
+                        pinyin: "kě yǐ gěi wǒ yī xiē shuǐ ma?"
+                    )
+
+                    TranscriptLine(
+                        speaker: "AI",
+                        english: "Sure. Still or sparkling?",
+                        mandarin: "好的。一般的水還是氣泡水？",
+                        pinyin: "hǎo de. yī bān de shuǐ hái shì qì pào shuǐ?"
+                    )
+                }
+            } else {
+                Text("Tap generate to preview the scene.")
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
@@ -251,37 +269,74 @@ private struct SceneGeneratorHero: View {
 }
 
 private struct AutoCardsHero: View {
-    @State private var isFlipped = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var currentIndex = 0
+
+    private let cards: [OnboardingCard] = [
+        OnboardingCard(
+            english: "How are you?",
+            mandarin: "你好嗎？",
+            pinyin: "nǐ hǎo ma?"
+        ),
+        OnboardingCard(
+            english: "I'm good, thanks.",
+            mandarin: "我很好，謝謝。",
+            pinyin: "wǒ hěn hǎo, xiè xiè."
+        ),
+        OnboardingCard(
+            english: "And you?",
+            mandarin: "你呢？",
+            pinyin: "nǐ ne?"
+        )
+    ]
+
+    private var currentCard: OnboardingCard {
+        cards[currentIndex]
+    }
+
+    private var nextCard: OnboardingCard {
+        cards[(currentIndex + 1) % cards.count]
+    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 8) {
-                TokenChip(text: "bubble tea")
-                TokenChip(text: "less ice")
-                TokenChip(text: "medium")
-            }
-
+        VStack(spacing: 16) {
             ZStack {
-                FlashcardStack(
-                    title: "bubble tea",
-                    subtitle: "zhen zhu nai cha",
-                    isAccent: false
+                StudyCardPreview(
+                    chinese: nextCard.mandarin,
+                    pinyin: nextCard.pinyin,
+                    english: nextCard.english
                 )
+                .scaleEffect(0.94)
                 .offset(x: 12, y: 12)
+                .opacity(0.6)
+
+                StudyCardPreview(
+                    chinese: currentCard.mandarin,
+                    pinyin: currentCard.pinyin,
+                    english: currentCard.english
+                )
+            }
+            .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: currentIndex)
+
+            HStack(spacing: 12) {
+                Button {
+                    advanceCard()
+                } label: {
+                    Text("Again")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
 
                 Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                        isFlipped.toggle()
-                    }
+                    advanceCard()
                 } label: {
-                    FlashcardStack(
-                        title: isFlipped ? "zhen zhu nai cha" : "bubble tea",
-                        subtitle: isFlipped ? "bubble tea" : "zhen zhu nai cha",
-                        isAccent: true
-                    )
+                    Text("Easy")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .neutralProminentButton()
             }
+            .controlSize(.large)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
@@ -293,6 +348,17 @@ private struct AutoCardsHero: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(Color(.separator).opacity(0.2), lineWidth: 1)
         )
+    }
+
+    private func advanceCard() {
+        let nextIndex = (currentIndex + 1) % cards.count
+        if reduceMotion {
+            currentIndex = nextIndex
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                currentIndex = nextIndex
+            }
+        }
     }
 }
 
@@ -321,9 +387,9 @@ private struct AddCardsHero: View {
                 .buttonStyle(.plain)
             }
 
-            FieldRow(title: "English", value: "bubble tea")
-            FieldRow(title: "Pinyin", value: "zhen zhu nai cha")
-            FieldRow(title: "Chinese", value: "zhen zhu nai cha")
+            FieldRow(title: "English", value: "How are you?")
+            FieldRow(title: "Pinyin", value: "nǐ hǎo ma?")
+            FieldRow(title: "Chinese", value: "你好嗎？")
 
             Text(isSaved ? "Card saved for practice." : "Tap the plus to save your own cards.")
                 .font(.footnote)
@@ -343,64 +409,88 @@ private struct AddCardsHero: View {
 }
 
 private struct ChatBubble: View {
-    let text: String
+    let english: String
+    let mandarin: String
+    let pinyin: String
     let isAccent: Bool
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 15, weight: .semibold, design: .rounded))
-            .foregroundStyle(isAccent ? AppColors.onAccent : .primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: 240, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isAccent ? AppColors.accent : Color(.systemBackground))
-            )
-    }
-}
-
-private struct TokenChip: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color(.systemBackground))
-            )
-    }
-}
-
-private struct FlashcardStack: View {
-    let title: String
-    let subtitle: String
-    let isAccent: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+        VStack(alignment: .leading, spacing: 4) {
+            Text(mandarin)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(isAccent ? AppColors.onAccent : .primary)
 
-            Text(subtitle)
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+            Text(pinyin)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(isAccent ? AppColors.onAccent.opacity(0.9) : .secondary)
+
+            Text(english)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(isAccent ? AppColors.onAccent.opacity(0.85) : .secondary)
         }
-        .padding(16)
-        .frame(width: 210, height: 120, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 240, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(isAccent ? AppColors.accent : Color(.systemBackground))
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.2), lineWidth: 1)
-        )
+        .accessibilityLabel("\(english). \(mandarin). \(pinyin)")
+    }
+}
+
+private struct StudyCardPreview: View {
+    let chinese: String
+    let pinyin: String
+    let english: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(chinese)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .multilineTextAlignment(.center)
+
+            Text(pinyin)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            Text(english)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, minHeight: 180)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
+    }
+}
+
+private struct OnboardingCard {
+    let english: String
+    let mandarin: String
+    let pinyin: String
+}
+
+private struct TranscriptLine: View {
+    let speaker: String
+    let english: String
+    let mandarin: String
+    let pinyin: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(speaker): \(english)")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+            Text(mandarin)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+            Text(pinyin)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
