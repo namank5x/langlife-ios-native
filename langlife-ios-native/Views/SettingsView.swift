@@ -1,5 +1,6 @@
 import Auth
 import GoogleSignIn
+import MessageUI
 import RevenueCat
 import RevenueCatUI
 import SwiftUI
@@ -10,6 +11,7 @@ struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
     @Binding var signInPresenter: UIViewController?
@@ -22,6 +24,8 @@ struct SettingsView: View {
     @State private var errorMessage: String?
     @State private var isPaywallPresented = false
     @State private var pendingPaywallPresentation = false
+    @State private var supportMailDraft: SupportMailDraft?
+    @State private var supportErrorMessage: String?
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -32,6 +36,14 @@ struct SettingsView: View {
         return subscriptionManager.customerInfo?.managementURL
             ?? URL(string: "https://apps.apple.com/account/subscriptions")
     }
+
+    private struct SupportMailDraft: Identifiable {
+        let id = UUID()
+        let subject: String
+        let recipients: [String]
+        let body: String
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -123,6 +135,18 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Support") {
+                    Button("Contact Support") {
+                        contactSupport()
+                    }
+
+                    if let supportErrorMessage {
+                        Text(supportErrorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
             .navigationTitle("Settings")
             .background(
@@ -153,6 +177,23 @@ struct SettingsView: View {
             )
             .sheet(isPresented: $isPaywallPresented) {
                 PaywallView()
+            }
+            .sheet(item: $supportMailDraft) { draft in
+                MailComposeView(
+                    subject: draft.subject,
+                    recipients: draft.recipients,
+                    body: draft.body
+                ) { result in
+                    supportMailDraft = nil
+                    switch result {
+                    case .success(let composeResult):
+                        if composeResult == .failed {
+                            supportErrorMessage = "Mail could not be sent."
+                        }
+                    case .failure(let error):
+                        supportErrorMessage = error.localizedDescription
+                    }
+                }
             }
             .onChange(of: scenePhase) { _ in
                 startPendingSignInIfPossible()
@@ -303,6 +344,54 @@ struct SettingsView: View {
             break
         }
         return topViewController
+    }
+
+    private func contactSupport() {
+        supportErrorMessage = nil
+        let userId = authManager.user?.id.uuidString
+        let userEmail = authManager.user?.email
+        let subject = "Lang Life Support"
+        let body = supportEmailBody(userId: userId, userEmail: userEmail)
+
+        if MFMailComposeViewController.canSendMail() {
+            supportMailDraft = SupportMailDraft(
+                subject: subject,
+                recipients: [AppConfig.supportEmail],
+                body: body
+            )
+        } else {
+            openSupportMailto(subject: subject, body: body)
+        }
+    }
+
+    private func supportEmailBody(userId: String?, userEmail: String?) -> String {
+        [
+            "Please describe the issue or request.",
+            "",
+            "User ID: \(userId ?? "unknown")",
+            "User Email: \(userEmail ?? "unknown")"
+        ].joined(separator: "\n")
+    }
+
+    private func openSupportMailto(subject: String, body: String) {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = AppConfig.supportEmail
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body)
+        ]
+
+        guard let url = components.url else {
+            supportErrorMessage = "Unable to build a support email."
+            return
+        }
+
+        openURL(url) { accepted in
+            if !accepted {
+                supportErrorMessage = "Unable to open Mail."
+            }
+        }
     }
 
 }

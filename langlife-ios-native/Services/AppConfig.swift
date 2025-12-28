@@ -37,6 +37,13 @@ enum AppConfig {
         return value
     }
 
+    static var supportEmail: String {
+        guard let value = SupabaseConfig["SUPPORT_EMAIL"], !value.isEmpty else {
+            preconditionFailure("Missing SUPPORT_EMAIL in app configuration")
+        }
+        return value
+    }
+
     private static func validatedURL(for key: String) -> URL {
         guard let value = SupabaseConfig[key], !value.isEmpty else {
             preconditionFailure("Missing \(key) in app configuration")
