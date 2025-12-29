@@ -1,4 +1,4 @@
 enum SubscriptionLimits {
-    static let freeSceneLimit = 8
-    static let freeDailyReviewLimit = 10
+    static let freeSceneLimit = 5
+    static let freeDailyReviewLimit = 5
 }
