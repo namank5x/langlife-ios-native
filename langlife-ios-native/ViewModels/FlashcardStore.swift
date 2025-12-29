@@ -31,14 +31,15 @@ final class FlashcardStore: ObservableObject {
 
         errorMessage = nil
         clearUserCacheIfNeeded()
-        loadFromLocalFallback()
+        cards = []
     }
 
     func refresh(for userId: UUID?) async {
         if isRefreshing, lastLoadedUserId == userId { return }
         guard let userId else {
             errorMessage = nil
-            loadFromLocalFallback()
+            clearUserCacheIfNeeded()
+            cards = []
             return
         }
 
@@ -202,9 +203,7 @@ final class FlashcardStore: ObservableObject {
             let fetchedCards = try await repository.fetchCards(for: userId)
             guard lastLoadedUserId == userId else { return }
             if fetchedCards.isEmpty {
-                let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
-                try await repository.insert(cards: seeded, userId: userId)
-                cards = seeded
+                cards = []
             } else {
                 cards = fetchedCards
             }
@@ -217,9 +216,6 @@ final class FlashcardStore: ObservableObject {
                 : "Could not load cards right now."
             if cards.isEmpty {
                 loadCachedCards(for: userId)
-                if cards.isEmpty {
-                    loadFromLocalFallback()
-                }
             }
         }
     }
@@ -228,17 +224,6 @@ final class FlashcardStore: ObservableObject {
         if let local = LocalFlashcardStore.load(userId: userId), !local.isEmpty {
             cards = local
         }
-    }
-
-    private func loadFromLocalFallback() {
-        if let local = LocalFlashcardStore.load(userId: nil), !local.isEmpty {
-            cards = local
-            return
-        }
-
-        let seeded = FlashcardSeed.defaults.map(Flashcard.initial(from:))
-        LocalFlashcardStore.save(seeded, userId: nil)
-        cards = seeded
     }
 
     private func mergeNewCards(_ newCards: [Flashcard]) {

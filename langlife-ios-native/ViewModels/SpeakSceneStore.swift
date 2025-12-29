@@ -4,7 +4,7 @@ import os
 
 @MainActor
 final class SpeakSceneStore: ObservableObject {
-    @Published private(set) var scenes: [SpeakScene] = SpeakSceneSeed.defaults
+    @Published private(set) var scenes: [SpeakScene] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
 
@@ -30,8 +30,7 @@ final class SpeakSceneStore: ObservableObject {
                 scenes = []
                 loadCachedScenes(for: userId)
                 if scenes.isEmpty {
-                    let pending = pendingScenes(for: userId)
-                    scenes = pending.isEmpty ? SpeakSceneSeed.defaults : pending
+                    scenes = pendingScenes(for: userId)
                 }
                 lastLoadedUserId = userId
             }
@@ -41,14 +40,14 @@ final class SpeakSceneStore: ObservableObject {
 
         errorMessage = nil
         clearUserCacheIfNeeded()
-        scenes = SpeakSceneSeed.defaults
+        scenes = []
     }
 
     func refresh(for userId: UUID?) async {
         if isRefreshing, lastLoadedUserId == userId { return }
         guard let userId else {
             errorMessage = nil
-            scenes = SpeakSceneSeed.defaults
+            scenes = []
             return
         }
 
@@ -77,9 +76,6 @@ final class SpeakSceneStore: ObservableObject {
 
     func removeScene(id: UUID, userId: UUID?) {
         scenes.removeAll { $0.id == id }
-        if scenes.isEmpty {
-            scenes = SpeakSceneSeed.defaults
-        }
         if let userId {
             LocalSpeakSceneStore.save(scenes, userId: userId)
             LocalSpeakSceneDetailStore.clear(userId: userId, sceneId: id)
@@ -133,8 +129,7 @@ final class SpeakSceneStore: ObservableObject {
             let fetchedScenes = try await repository.fetchScenes(for: userId)
             guard lastLoadedUserId == userId else { return }
             if fetchedScenes.isEmpty {
-                let pending = pendingScenes(for: userId)
-                scenes = pending.isEmpty ? SpeakSceneSeed.defaults : pending
+                scenes = pendingScenes(for: userId)
                 LocalSpeakSceneStore.save(scenes, userId: userId)
                 updateSyncState(userId: userId, lastServerCreatedAt: nil)
                 return
@@ -150,10 +145,10 @@ final class SpeakSceneStore: ObservableObject {
             }
             Self.logger.error("Failed to refresh scenes: \(error.diagnosticDescription, privacy: .public)")
             errorMessage = mapRefreshError(error)
-            if scenes.isEmpty || scenes == SpeakSceneSeed.defaults {
+            if scenes.isEmpty {
                 loadCachedScenes(for: userId)
                 if scenes.isEmpty {
-                    scenes = SpeakSceneSeed.defaults
+                    scenes = pendingScenes(for: userId)
                 }
             }
         }
