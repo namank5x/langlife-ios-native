@@ -14,6 +14,7 @@ final class AuthManager: ObservableObject {
 
     @Published private(set) var session: Session?
     @Published private(set) var user: User?
+    @Published private(set) var authPhase: AuthPhase = .checking
 
     private var authStateTask: Task<Void, Never>?
     private var appleSignInCoordinator: AppleSignInCoordinator?
@@ -32,6 +33,7 @@ final class AuthManager: ObservableObject {
                 if [.initialSession, .signedIn, .signedOut, .tokenRefreshed, .userUpdated].contains(event) {
                     self.session = session
                     self.user = session?.user
+                    self.authPhase = session == nil ? .signedOut : .signedIn
                 }
             }
         }
@@ -203,6 +205,12 @@ final class AuthManager: ObservableObject {
         }
         return topViewController
     }
+}
+
+enum AuthPhase: Equatable {
+    case checking
+    case signedOut
+    case signedIn
 }
 
 enum AuthManagerError: LocalizedError {

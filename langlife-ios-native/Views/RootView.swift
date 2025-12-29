@@ -3,6 +3,7 @@ import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("onboardingVersionSeen") private var onboardingVersionSeen = 0
     @Binding var signInPresenter: UIViewController?
 
@@ -14,11 +15,20 @@ struct RootView: View {
                 OnboardingView {
                     onboardingVersionSeen = currentOnboardingVersion
                 }
-            } else if authManager.user == nil {
-                LoginGateView(signInPresenter: $signInPresenter)
             } else {
-                ContentView(signInPresenter: $signInPresenter)
+                switch authManager.authPhase {
+                case .checking:
+                    AuthLoadingView()
+                        .transition(reduceMotion ? .identity : .opacity)
+                case .signedOut:
+                    LoginGateView(signInPresenter: $signInPresenter)
+                        .transition(reduceMotion ? .identity : .opacity)
+                case .signedIn:
+                    ContentView(signInPresenter: $signInPresenter)
+                        .transition(reduceMotion ? .identity : .opacity)
+                }
             }
         }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: authManager.authPhase)
     }
 }
