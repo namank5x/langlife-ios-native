@@ -79,6 +79,16 @@ enum LocalSceneOutboxStore {
         }
     }
 
+    static func clear(userId: UUID) {
+        let userKey = LocalStoreKeys.userKey(userId)
+        AppDatabase.write { db in
+            try db.execute(
+                sql: "DELETE FROM scene_outbox WHERE user_id = ?",
+                arguments: [userKey]
+            )
+        }
+    }
+
     static func enqueue(
         scene: SpeakScene,
         userId: UUID,

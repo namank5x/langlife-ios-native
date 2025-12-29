@@ -2,6 +2,16 @@ import Foundation
 import GRDB
 
 enum LocalReviewLimitStore {
+    static func clear(userId: UUID) {
+        let userKey = LocalStoreKeys.userKey(userId)
+        AppDatabase.write { db in
+            try db.execute(
+                sql: "DELETE FROM review_limits WHERE user_id = ?",
+                arguments: [userKey]
+            )
+        }
+    }
+
     static func loadCount(userId: UUID, dayStart: Date) -> Int {
         let userKey = LocalStoreKeys.userKey(userId)
         let dayStartSeconds = dayStart.timeIntervalSince1970

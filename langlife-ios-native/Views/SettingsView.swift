@@ -2,6 +2,7 @@ import Auth
 import GoogleSignIn
 import MessageUI
 import RevenueCat
+import SafariServices
 import SwiftUI
 import UIKit
 
@@ -25,15 +26,30 @@ struct SettingsView: View {
     @State private var supportMailDraft: SupportMailDraft?
     @State private var supportErrorMessage: String?
     @State private var isOnboardingPresented = false
+    @State private var isDeleteAccountDialogPresented = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountErrorMessage: String?
+    @State private var isPrivacyPolicyPresented = false
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter
     }()
+    private let accountDeletionRepository = AccountDeletionRepository()
     private var manageSubscriptionURL: URL? {
         guard subscriptionManager.isPro else { return nil }
         return subscriptionManager.customerInfo?.managementURL
             ?? URL(string: "https://apps.apple.com/account/subscriptions")
+    }
+    private var signInOptionsSheet: some View {
+        SignInOptionsSheet(
+            onSelect: { provider in
+                pendingSignInProvider = provider
+                isSignInOptionsPresented = false
+            }
+        )
+        .presentationDetents([.height(260)])
+        .presentationDragIndicator(.visible)
     }
 
     private struct SupportMailDraft: Identifiable {
@@ -43,113 +59,178 @@ struct SettingsView: View {
         let body: String
     }
 
+    private struct SafariView: UIViewControllerRepresentable {
+        let url: URL
+
+        func makeUIViewController(context: Context) -> SFSafariViewController {
+            SFSafariViewController(url: url)
+        }
+
+        func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+    }
+
+    @ViewBuilder
+    private var accountSection: some View {
+        Section("Account") {
+            if let user = authManager.user {
+                Text(user.email ?? "Signed in")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Button("Sign out") {
+                    Task {
+                        await signOut()
+                    }
+                }
+                .disabled(isDeletingAccount)
+            } else {
+                Button {
+                    isSignInOptionsPresented = true
+                } label: {
+                    Text("Sign In")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .foregroundStyle(AppColors.onAccent)
+                        .background(Capsule().fill(AppColors.accent))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSigningIn)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var subscriptionSection: some View {
+        if authManager.user != nil {
+            Section("Subscription") {
+                HStack {
+                    Text("Lang Life Pro")
+                    Spacer()
+                    Text(subscriptionManager.isPro ? "Active" : "Not active")
+                        .font(.subheadline)
+                        .foregroundStyle(subscriptionManager.isPro ? .green : .secondary)
+                }
+
+                if subscriptionManager.isPro, let planLabel = subscriptionManager.activePlanLabel {
+                    HStack {
+                        Text("Plan")
+                        Spacer()
+                        Text(planLabel)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if subscriptionManager.isPro,
+                   let expiration = subscriptionManager.activePlanExpiration {
+                    HStack {
+                        Text("Renews on")
+                        Spacer()
+                        Text(dateFormatter.string(from: expiration))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !subscriptionManager.isPro {
+                    Button("Buy Pro") {
+                        presentPaywall()
+                    }
+                }
+
+                if let managementURL = manageSubscriptionURL {
+                    Link("Manage in App Store", destination: managementURL)
+                }
+
+                Button("Restore Purchases") {
+                    Task {
+                        await subscriptionManager.restore()
+                    }
+                }
+
+                if let subscriptionError = subscriptionManager.lastErrorMessage {
+                    Text(subscriptionError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    private var supportSection: some View {
+        Section("Support") {
+            Button("Contact Support") {
+                contactSupport()
+            }
+
+            Button("How it works") {
+                isOnboardingPresented = true
+            }
+
+            if let supportErrorMessage {
+                Text(supportErrorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var privacyPolicySection: some View {
+        if let privacyURL = AppConfig.privacyPolicyURL {
+            Section("Legal") {
+                Button("Privacy Policy") {
+                    isPrivacyPolicyPresented = true
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var deleteAccountSection: some View {
+        if authManager.user != nil {
+            Section {
+                Button(role: .destructive) {
+                    deleteAccountErrorMessage = nil
+                    isDeleteAccountDialogPresented = true
+                } label: {
+                    if isDeletingAccount {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Deleting...")
+                        }
+                    } else {
+                        Text("Delete Account")
+                    }
+                }
+                .disabled(isDeletingAccount)
+                if let deleteAccountErrorMessage {
+                    Text(deleteAccountErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Danger")
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                Section("Account") {
-                    if let user = authManager.user {
-                        Text(user.email ?? "Signed in")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                        Button("Sign out") {
-                            Task {
-                                await signOut()
-                            }
-                        }
-                    } else {
-                        Button {
-                            isSignInOptionsPresented = true
-                        } label: {
-                            Text("Sign In")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, minHeight: 60)
-                                .foregroundStyle(AppColors.onAccent)
-                                .background(Capsule().fill(AppColors.accent))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isSigningIn)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                    }
-
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                if authManager.user != nil {
-                    Section("Subscription") {
-                        HStack {
-                            Text("Lang Life Pro")
-                            Spacer()
-                            Text(subscriptionManager.isPro ? "Active" : "Not active")
-                                .font(.subheadline)
-                                .foregroundStyle(subscriptionManager.isPro ? .green : .secondary)
-                        }
-
-                        if subscriptionManager.isPro, let planLabel = subscriptionManager.activePlanLabel {
-                            HStack {
-                                Text("Plan")
-                                Spacer()
-                                Text(planLabel)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if subscriptionManager.isPro,
-                           let expiration = subscriptionManager.activePlanExpiration {
-                            HStack {
-                                Text("Renews on")
-                                Spacer()
-                                Text(dateFormatter.string(from: expiration))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if !subscriptionManager.isPro {
-                            Button("Buy Pro") {
-                                presentPaywall()
-                            }
-                        }
-
-                        if let managementURL = manageSubscriptionURL {
-                            Link("Manage in App Store", destination: managementURL)
-                        }
-
-                        Button("Restore Purchases") {
-                            Task {
-                                await subscriptionManager.restore()
-                            }
-                        }
-
-                        if let subscriptionError = subscriptionManager.lastErrorMessage {
-                            Text(subscriptionError)
-                                .font(.footnote)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                Section("Support") {
-                    Button("Contact Support") {
-                        contactSupport()
-                    }
-
-                    Button("How it works") {
-                        isOnboardingPresented = true
-                    }
-
-                    if let supportErrorMessage {
-                        Text(supportErrorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-                }
+                accountSection
+                subscriptionSection
+                supportSection
+                privacyPolicySection
+                deleteAccountSection
             }
             .navigationTitle("Settings")
             .background(
@@ -168,18 +249,16 @@ struct SettingsView: View {
                     startPendingSignInIfPossible()
                 },
                 content: {
-                SignInOptionsSheet(
-                    onSelect: { provider in
-                        pendingSignInProvider = provider
-                        isSignInOptionsPresented = false
-                    }
-                )
-                .presentationDetents([.height(260)])
-                .presentationDragIndicator(.visible)
+                    signInOptionsSheet
             }
             )
             .sheet(isPresented: $isPaywallPresented) {
                 PaywallScreen()
+            }
+            .sheet(isPresented: $isPrivacyPolicyPresented) {
+                if let privacyURL = AppConfig.privacyPolicyURL {
+                    SafariView(url: privacyURL)
+                }
             }
             .fullScreenCover(isPresented: $isOnboardingPresented) {
                 OnboardingView {
@@ -219,6 +298,20 @@ struct SettingsView: View {
                     }
                 }
             }
+            .confirmationDialog(
+                "Delete account?",
+                isPresented: $isDeleteAccountDialogPresented,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Account", role: .destructive) {
+                    Task {
+                        await deleteAccount()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This cannot be undone.")
+            }
         }
     }
 
@@ -248,6 +341,25 @@ struct SettingsView: View {
     }
 
     @MainActor
+    private func deleteAccount() async {
+        guard !isDeletingAccount else { return }
+        guard let userId = authManager.user?.id else { return }
+        isDeletingAccount = true
+        deleteAccountErrorMessage = nil
+        errorMessage = nil
+        defer { isDeletingAccount = false }
+
+        do {
+            try await accountDeletionRepository.deleteAccount()
+            LocalUserDataStore.clearAll(userId: userId)
+            try? await authManager.signOut()
+            dismiss()
+        } catch {
+            deleteAccountErrorMessage = deleteAccountErrorMessage(for: error)
+        }
+    }
+
+    @MainActor
     private func signInWithGoogle() async {
         guard !isSigningIn else { return }
         isSigningIn = true
@@ -272,6 +384,16 @@ struct SettingsView: View {
         let nsError = error as NSError
         return nsError.domain == "com.google.GIDSignIn"
             && nsError.code == -5
+    }
+
+    private func deleteAccountErrorMessage(for error: Error) -> String {
+        if let apiError = error as? APIClientError,
+           case APIClientError.httpError(let statusCode) = apiError,
+           statusCode == 401 {
+            return "Session expired. Please sign in again."
+        }
+
+        return "Unable to delete your account right now."
     }
 
     private func performSignIn(_ provider: SignInProvider) async {
