@@ -39,6 +39,17 @@ struct PaywallScreen: View {
                 .padding(.vertical, 24)
             }
             .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
+                    .disabled(subscriptionManager.isProcessingPurchase)
+                }
+            }
             .task {
                 guard subscriptionManager.offerings == nil else { return }
                 isRefreshing = true

@@ -252,7 +252,7 @@ struct SettingsView: View {
                     signInOptionsSheet
             }
             )
-            .sheet(isPresented: $isPaywallPresented) {
+            .fullScreenCover(isPresented: $isPaywallPresented) {
                 PaywallScreen()
             }
             .sheet(isPresented: $isPrivacyPolicyPresented) {

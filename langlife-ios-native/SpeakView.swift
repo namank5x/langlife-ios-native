@@ -45,10 +45,6 @@ struct SpeakView: View {
         !subscriptionManager.isPro
             && sceneStore.scenes.count >= SubscriptionLimits.freeSceneLimit
     }
-    private var sceneLimitMessage: String {
-        "Free plan includes up to \(SubscriptionLimits.freeSceneLimit) scenes. Upgrade to Lang Life Pro to add more."
-    }
-
     var body: some View {
         ScrollView {
             TagFlowLayout(spacing: 12, rowSpacing: 12) {
@@ -166,7 +162,7 @@ struct SpeakView: View {
                 .presentationDragIndicator(.visible)
             }
         )
-        .sheet(isPresented: $isPaywallPresented) {
+        .fullScreenCover(isPresented: $isPaywallPresented) {
             PaywallScreen()
         }
         .refreshable {
@@ -218,7 +214,6 @@ struct SpeakView: View {
             }
             guard !isSceneLimitReached else {
                 isAddScenePresented = false
-                actionErrorMessage = sceneLimitMessage
                 isPaywallPresented = true
                 return
             }
@@ -255,7 +250,6 @@ struct SpeakView: View {
             return
         }
         guard !isSceneLimitReached else {
-            actionErrorMessage = sceneLimitMessage
             isPaywallPresented = true
             return
         }
@@ -286,7 +280,6 @@ struct SpeakView: View {
         if pendingGenerateScene {
             pendingGenerateScene = false
             guard !isSceneLimitReached else {
-                actionErrorMessage = sceneLimitMessage
                 isPaywallPresented = true
                 return
             }
@@ -441,7 +434,6 @@ struct SpeakView: View {
             return
         }
         guard !isSceneLimitReached else {
-            actionErrorMessage = sceneLimitMessage
             isPaywallPresented = true
             return
         }
@@ -482,7 +474,6 @@ struct SpeakView: View {
             return false
         }
         guard !isSceneLimitReached else {
-            addSceneError = sceneLimitMessage
             isPaywallPresented = true
             return false
         }

@@ -241,7 +241,7 @@ struct StudyView: View {
                 .presentationDragIndicator(.visible)
             }
         )
-        .sheet(isPresented: $isPaywallPresented) {
+        .fullScreenCover(isPresented: $isPaywallPresented) {
             PaywallScreen()
         }
         .navigationDestination(isPresented: $isManageCardsPresented) {
