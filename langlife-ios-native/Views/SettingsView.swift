@@ -30,6 +30,7 @@ struct SettingsView: View {
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
     @State private var isPrivacyPolicyPresented = false
+    @State private var isTermsOfServicePresented = false
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -185,10 +186,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var privacyPolicySection: some View {
-        if let privacyURL = AppConfig.privacyPolicyURL {
+        let privacyURL = AppConfig.privacyPolicyURL
+        let termsURL = AppConfig.termsOfServiceURL
+        if privacyURL != nil || termsURL != nil {
             Section("Legal") {
-                Button("Privacy Policy") {
-                    isPrivacyPolicyPresented = true
+                if privacyURL != nil {
+                    Button("Privacy Policy") {
+                        isPrivacyPolicyPresented = true
+                    }
+                }
+
+                if termsURL != nil {
+                    Button("Terms of Service") {
+                        isTermsOfServicePresented = true
+                    }
                 }
             }
         }
@@ -258,6 +269,11 @@ struct SettingsView: View {
             .sheet(isPresented: $isPrivacyPolicyPresented) {
                 if let privacyURL = AppConfig.privacyPolicyURL {
                     SafariView(url: privacyURL)
+                }
+            }
+            .sheet(isPresented: $isTermsOfServicePresented) {
+                if let termsURL = AppConfig.termsOfServiceURL {
+                    SafariView(url: termsURL)
                 }
             }
             .fullScreenCover(isPresented: $isOnboardingPresented) {

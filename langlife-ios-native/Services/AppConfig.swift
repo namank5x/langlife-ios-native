@@ -51,6 +51,13 @@ enum AppConfig {
         return validatedURL(from: value, key: "PRIVACY_POLICY_URL")
     }
 
+    static var termsOfServiceURL: URL? {
+        guard let value = SupabaseConfig["TERMS_OF_SERVICE_URL"], !value.isEmpty else {
+            return nil
+        }
+        return validatedURL(from: value, key: "TERMS_OF_SERVICE_URL")
+    }
+
     private static func validatedURL(for key: String) -> URL {
         guard let value = SupabaseConfig[key], !value.isEmpty else {
             preconditionFailure("Missing \(key) in app configuration")

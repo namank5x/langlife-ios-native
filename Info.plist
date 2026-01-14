@@ -34,6 +34,8 @@
 	<string>support@wovenlabs.net</string>
 	<key>PRIVACY_POLICY_URL</key>
 	<string>https://www.langlife.app/privacy</string>
+	<key>TERMS_OF_SERVICE_URL</key>
+	<string>https://www.langlife.app/terms</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We use the microphone so you can practice speaking the scene lines.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
