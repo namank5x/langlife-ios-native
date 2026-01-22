@@ -15,9 +15,11 @@ final class AuthManager: ObservableObject {
     @Published private(set) var session: Session?
     @Published private(set) var user: User?
     @Published private(set) var authPhase: AuthPhase = .checking
+    @Published private(set) var authStatus: AuthStatus = .idle
 
     private var authStateTask: Task<Void, Never>?
     private var appleSignInCoordinator: AppleSignInCoordinator?
+    private var authStatusTimeoutTask: Task<Void, Never>?
 
     var isAuthenticated: Bool {
         session != nil
@@ -34,6 +36,7 @@ final class AuthManager: ObservableObject {
                     self.session = session
                     self.user = session?.user
                     self.authPhase = session == nil ? .signedOut : .signedIn
+                    self.handleAuthStateChange(event: event, session: session)
                 }
             }
         }
@@ -67,51 +70,121 @@ final class AuthManager: ObservableObject {
     }
 
     func signInWithApple() async throws {
-        let window = try activeWindow()
-        let coordinator = AppleSignInCoordinator(window: window)
-        appleSignInCoordinator = coordinator
-        defer { appleSignInCoordinator = nil }
+        beginSignIn(provider: .apple)
+        do {
+            let window = try activeWindow()
+            let coordinator = AppleSignInCoordinator(window: window)
+            appleSignInCoordinator = coordinator
+            defer { appleSignInCoordinator = nil }
 
-        let result = try await coordinator.start()
-        try await signInWithApple(credential: result.credential, rawNonce: result.rawNonce)
+            let result = try await coordinator.start()
+            try await signInWithApple(credential: result.credential, rawNonce: result.rawNonce)
+        } catch {
+            handleSignInError(error)
+            throw error
+        }
     }
 
     func signInWithGoogle(presentingViewController: UIViewController? = nil) async throws {
-        let configuration = GIDConfiguration(
-            clientID: AppConfig.googleClientID,
-            serverClientID: AppConfig.googleServerClientID
-        )
-        GIDSignIn.sharedInstance.configuration = configuration
-
-        let presentingViewController = try await resolvePresentingViewController(
-            fallback: presentingViewController
-        )
-        let result: GIDSignInResult
+        beginSignIn(provider: .google)
         do {
+            let configuration = GIDConfiguration(
+                clientID: AppConfig.googleClientID,
+                serverClientID: AppConfig.googleServerClientID
+            )
+            GIDSignIn.sharedInstance.configuration = configuration
+
+            let presentingViewController = try await resolvePresentingViewController(
+                fallback: presentingViewController
+            )
+            let result: GIDSignInResult
             result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingViewController)
+
+            guard let idToken = result.user.idToken?.tokenString else {
+                throw AuthManagerError.invalidGoogleIdentityToken
+            }
+            let accessToken = result.user.accessToken.tokenString
+            guard !accessToken.isEmpty else {
+                throw AuthManagerError.invalidGoogleAccessToken
+            }
+
+            _ = try await supabase.auth.signInWithIdToken(
+                credentials: .init(
+                    provider: .google,
+                    idToken: idToken,
+                    accessToken: accessToken
+                )
+            )
         } catch {
+            handleSignInError(error)
             throw error
         }
-
-        guard let idToken = result.user.idToken?.tokenString else {
-            throw AuthManagerError.invalidGoogleIdentityToken
-        }
-        let accessToken = result.user.accessToken.tokenString
-        guard !accessToken.isEmpty else {
-            throw AuthManagerError.invalidGoogleAccessToken
-        }
-
-        _ = try await supabase.auth.signInWithIdToken(
-            credentials: .init(
-                provider: .google,
-                idToken: idToken,
-                accessToken: accessToken
-            )
-        )
     }
 
     func signOut() async throws {
+        clearAuthStatus()
         try await supabase.auth.signOut()
+    }
+
+    func resetAuthStatus() {
+        clearAuthStatus()
+    }
+
+    private func beginSignIn(provider: SignInProvider) {
+        authStatus = .signingIn(provider: provider, startedAt: Date())
+        scheduleAuthStatusTimeout()
+    }
+
+    private func scheduleAuthStatusTimeout() {
+        authStatusTimeoutTask?.cancel()
+        authStatusTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard case .signingIn = authStatus else { return }
+            authStatus = .error(message: "Still finishing sign-in. Please try again.")
+        }
+    }
+
+    private func handleSignInError(_ error: Error) {
+        authStatusTimeoutTask?.cancel()
+        if isUserCancellation(error) {
+            authStatus = .idle
+            return
+        }
+        authStatus = .error(message: error.localizedDescription)
+    }
+
+    private func clearAuthStatus() {
+        authStatusTimeoutTask?.cancel()
+        authStatusTimeoutTask = nil
+        authStatus = .idle
+    }
+
+    private func isUserCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == ASAuthorizationError.errorDomain,
+           nsError.code == ASAuthorizationError.canceled.rawValue {
+            return true
+        }
+        if nsError.domain == "com.google.GIDSignIn",
+           nsError.code == -5 {
+            return true
+        }
+        return false
+    }
+
+    private func handleAuthStateChange(event: AuthChangeEvent, session: Session?) {
+        switch event {
+        case .signedIn, .tokenRefreshed, .userUpdated:
+            clearAuthStatus()
+        case .signedOut:
+            clearAuthStatus()
+        case .initialSession:
+            if session == nil {
+                clearAuthStatus()
+            }
+        default:
+            break
+        }
     }
 
     private func activeWindow() throws -> UIWindow {
@@ -211,6 +284,12 @@ enum AuthPhase: Equatable {
     case checking
     case signedOut
     case signedIn
+}
+
+enum AuthStatus: Equatable {
+    case idle
+    case signingIn(provider: SignInProvider, startedAt: Date)
+    case error(message: String)
 }
 
 enum AuthManagerError: LocalizedError {

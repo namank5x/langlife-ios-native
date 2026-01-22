@@ -1,7 +1,7 @@
 import AuthenticationServices
 import SwiftUI
 
-enum SignInProvider {
+enum SignInProvider: Equatable {
     case apple
     case google
 }

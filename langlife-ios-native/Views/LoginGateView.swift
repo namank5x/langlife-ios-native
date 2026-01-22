@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AuthenticationServices
 
 struct LoginGateView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -7,7 +8,6 @@ struct LoginGateView: View {
     @Binding var signInPresenter: UIViewController?
 
     @State private var localSignInPresenter: UIViewController?
-    @State private var isSigningIn = false
     @State private var isOnboardingPresented = false
     @State private var pendingSignInProvider: SignInProvider?
     @State private var shouldStartSignIn = false
@@ -65,8 +65,8 @@ struct LoginGateView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                    if let errorMessage {
-                        Text(errorMessage)
+                    if let message = currentErrorMessage {
+                        Text(message)
                             .font(.footnote)
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
@@ -92,18 +92,46 @@ struct LoginGateView: View {
         .onChange(of: scenePhase) { _ in
             startPendingSignInIfPossible()
         }
+        .overlay(
+            AuthStatusOverlay(
+                status: authManager.authStatus,
+                onCancel: {
+                    Task {
+                        try? await authManager.signOut()
+                    }
+                },
+                onDismissError: {
+                    authManager.resetAuthStatus()
+                }
+            )
+        )
+    }
+
+    private var isSigningIn: Bool {
+        if case .signingIn = authManager.authStatus {
+            return true
+        }
+        return false
+    }
+
+    private var currentErrorMessage: String? {
+        if case .error(let message) = authManager.authStatus {
+            return message
+        }
+        return errorMessage
     }
 
     @MainActor
     private func signInWithApple() async {
         guard !isSigningIn else { return }
-        isSigningIn = true
         errorMessage = nil
-        defer { isSigningIn = false }
 
         do {
             try await authManager.signInWithApple()
         } catch {
+            if isAppleSignInCancelled(error) {
+                return
+            }
             errorMessage = error.localizedDescription
         }
     }
@@ -111,15 +139,12 @@ struct LoginGateView: View {
     @MainActor
     private func signInWithGoogle() async {
         guard !isSigningIn else { return }
-        isSigningIn = true
         errorMessage = nil
 
         do {
             let presenter = signInPresenter ?? localSignInPresenter
             try await authManager.signInWithGoogle(presentingViewController: presenter)
-            isSigningIn = false
         } catch {
-            isSigningIn = false
             if isGoogleSignInCancelled(error) {
                 return
             }
@@ -131,6 +156,12 @@ struct LoginGateView: View {
         let nsError = error as NSError
         return nsError.domain == "com.google.GIDSignIn"
             && nsError.code == -5
+    }
+
+    private func isAppleSignInCancelled(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == ASAuthorizationError.errorDomain
+            && nsError.code == ASAuthorizationError.canceled.rawValue
     }
 
     private func performSignIn(_ provider: SignInProvider) async {

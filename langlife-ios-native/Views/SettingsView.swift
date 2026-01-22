@@ -1,4 +1,5 @@
 import Auth
+import AuthenticationServices
 import GoogleSignIn
 import MessageUI
 import RevenueCat
@@ -16,7 +17,6 @@ struct SettingsView: View {
     @Binding var signInPresenter: UIViewController?
 
     @State private var localSignInPresenter: UIViewController?
-    @State private var isSigningIn = false
     @State private var isSignInOptionsPresented = false
     @State private var pendingSignInProvider: SignInProvider?
     @State private var shouldStartSignIn = false
@@ -100,8 +100,8 @@ struct SettingsView: View {
                 .listRowBackground(Color.clear)
             }
 
-            if let errorMessage {
-                Text(errorMessage)
+            if let message = currentErrorMessage {
+                Text(message)
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
@@ -329,18 +329,47 @@ struct SettingsView: View {
                 Text("This cannot be undone.")
             }
         }
+        .overlay(
+            AuthStatusOverlay(
+                status: authManager.authStatus,
+                onCancel: {
+                    Task {
+                        try? await authManager.signOut()
+                    }
+                },
+                onDismissError: {
+                    authManager.resetAuthStatus()
+                }
+            )
+        )
+    }
+
+    private var isSigningIn: Bool {
+        if case .signingIn = authManager.authStatus {
+            return true
+        }
+        return false
+    }
+
+    private var currentErrorMessage: String? {
+        if case .error(let message) = authManager.authStatus {
+            return message
+        }
+        return errorMessage
     }
 
     @MainActor
     private func signInWithApple() async {
         guard !isSigningIn else { return }
-        isSigningIn = true
         errorMessage = nil
-        defer { isSigningIn = false }
 
         do {
             try await authManager.signInWithApple()
         } catch {
+            if isAppleSignInCancelled(error) {
+                pendingPaywallPresentation = false
+                return
+            }
             errorMessage = error.localizedDescription
             pendingPaywallPresentation = false
         }
@@ -378,15 +407,12 @@ struct SettingsView: View {
     @MainActor
     private func signInWithGoogle() async {
         guard !isSigningIn else { return }
-        isSigningIn = true
         errorMessage = nil
 
         do {
             let presenter = signInPresenter ?? localSignInPresenter
             try await authManager.signInWithGoogle(presentingViewController: presenter)
-            isSigningIn = false
         } catch {
-            isSigningIn = false
             if isGoogleSignInCancelled(error) {
                 pendingPaywallPresentation = false
                 return
@@ -394,6 +420,12 @@ struct SettingsView: View {
             errorMessage = error.localizedDescription
             pendingPaywallPresentation = false
         }
+    }
+
+    private func isAppleSignInCancelled(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == ASAuthorizationError.errorDomain
+            && nsError.code == ASAuthorizationError.canceled.rawValue
     }
 
     private func isGoogleSignInCancelled(_ error: Error) -> Bool {
