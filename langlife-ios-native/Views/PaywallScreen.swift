@@ -199,13 +199,16 @@ struct PaywallScreen: View {
     }
 
     private func planSortOrder(for package: Package) -> Int {
-        if isMonthly(package) {
+        switch planKind(for: package) {
+        case .weekly:
             return 0
-        }
-        if isWeekly(package) {
+        case .monthly:
             return 1
+        case .annual:
+            return 2
+        case .other:
+            return 3
         }
-        return 2
     }
 
     private func isSelected(_ package: Package) -> Bool {
@@ -216,16 +219,40 @@ struct PaywallScreen: View {
     }
 
     private func isBestValue(_ package: Package) -> Bool {
-        isMonthly(package)
+        planKind(for: package) == .annual
     }
 
-    private func isMonthly(_ package: Package) -> Bool {
-        package.packageType == .monthly || package.identifier == RevenueCatConstants.PackageID.monthly
+    private func planKind(for package: Package) -> PlanKind {
+        switch package.packageType {
+        case .weekly:
+            return .weekly
+        case .monthly:
+            return .monthly
+        case .annual:
+            return .annual
+        default:
+            if let unit = package.storeProduct.subscriptionPeriod?.unit {
+                switch unit {
+                case .week:
+                    return .weekly
+                case .month:
+                    return .monthly
+                case .year:
+                    return .annual
+                default:
+                    return .other
+                }
+            }
+            return .other
+        }
     }
+}
 
-    private func isWeekly(_ package: Package) -> Bool {
-        package.packageType == .weekly || package.identifier == RevenueCatConstants.PackageID.weekly
-    }
+private enum PlanKind {
+    case weekly
+    case monthly
+    case annual
+    case other
 }
 
 private struct BenefitRow: View {
@@ -304,24 +331,53 @@ private struct PlanCard: View {
     }
 
     private var planTitle: String {
-        switch package.packageType {
+        switch planKind {
         case .monthly:
             return "Monthly"
         case .weekly:
             return "Weekly"
-        default:
+        case .annual:
+            return "Annual"
+        case .other:
             return package.storeProduct.localizedTitle
         }
     }
 
     private var planSubtitle: String {
-        switch package.packageType {
+        switch planKind {
         case .monthly:
             return "Billed monthly, cancel anytime"
         case .weekly:
             return "Billed weekly, cancel anytime"
-        default:
+        case .annual:
+            return "Billed annually, cancel anytime"
+        case .other:
             return "Cancel anytime"
+        }
+    }
+
+    private var planKind: PlanKind {
+        switch package.packageType {
+        case .weekly:
+            return .weekly
+        case .monthly:
+            return .monthly
+        case .annual:
+            return .annual
+        default:
+            if let unit = package.storeProduct.subscriptionPeriod?.unit {
+                switch unit {
+                case .week:
+                    return .weekly
+                case .month:
+                    return .monthly
+                case .year:
+                    return .annual
+                default:
+                    return .other
+                }
+            }
+            return .other
         }
     }
 }

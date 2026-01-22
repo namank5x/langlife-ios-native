@@ -16,6 +16,7 @@ final class SubscriptionManager: ObservableObject {
 
     private var customerInfoTask: Task<Void, Never>?
     private var currentAppUserID: String?
+    private var productPlanInfoById: [String: PlanDescriptor] = [:]
 
     func start() {
         guard customerInfoTask == nil else { return }
@@ -29,7 +30,9 @@ final class SubscriptionManager: ObservableObject {
     func refresh(fetchPolicy: CacheFetchPolicy = .default) async {
         lastErrorMessage = nil
         do {
-            offerings = try await Purchases.shared.offerings()
+            let fetchedOfferings = try await Purchases.shared.offerings()
+            offerings = fetchedOfferings
+            productPlanInfoById = buildPlanMap(from: fetchedOfferings)
             let info = try await Purchases.shared.customerInfo(fetchPolicy: fetchPolicy)
             apply(customerInfo: info)
         } catch {
@@ -90,13 +93,91 @@ final class SubscriptionManager: ObservableObject {
 
     private func planLabel(for productId: String?) -> String? {
         guard let productId, !productId.isEmpty else { return nil }
-        switch productId {
-        case RevenueCatConstants.ProductID.monthly:
-            return "Monthly"
-        case RevenueCatConstants.ProductID.weekly:
+        if let planInfo = productPlanInfoById[productId],
+           let label = label(for: planInfo) {
+            return label
+        }
+        return nil
+    }
+
+    private func label(for planInfo: PlanDescriptor) -> String? {
+        switch planInfo.planType {
+        case .weekly:
             return "Weekly"
-        default:
-            return "Unknown"
+        case .monthly:
+            return "Monthly"
+        case .annual:
+            return "Annual"
+        case .unknown:
+            if let unit = planInfo.subscriptionUnit {
+                switch unit {
+                case .week:
+                    return "Weekly"
+                case .month:
+                    return "Monthly"
+                case .year:
+                    return "Annual"
+                default:
+                    break
+                }
+            }
+            return planInfo.fallbackTitle
+        }
+    }
+
+    private func buildPlanMap(from offerings: Offerings?) -> [String: PlanDescriptor] {
+        var map: [String: PlanDescriptor] = [:]
+        guard let offerings else { return map }
+        for (_, offering) in offerings.all {
+            for package in offering.availablePackages {
+                let product = package.storeProduct
+                let descriptor = PlanDescriptor(
+                    planType: PlanType(packageType: package.packageType, subscriptionUnit: product.subscriptionPeriod?.unit),
+                    subscriptionUnit: product.subscriptionPeriod?.unit,
+                    fallbackTitle: product.localizedTitle
+                )
+                map[product.productIdentifier] = descriptor
+            }
+        }
+        return map
+    }
+
+    private struct PlanDescriptor {
+        let planType: PlanType
+        let subscriptionUnit: SubscriptionPeriod.Unit?
+        let fallbackTitle: String?
+    }
+
+    private enum PlanType {
+        case weekly
+        case monthly
+        case annual
+        case unknown
+
+        init(packageType: PackageType, subscriptionUnit: SubscriptionPeriod.Unit?) {
+            switch packageType {
+            case .weekly:
+                self = .weekly
+            case .monthly:
+                self = .monthly
+            case .annual:
+                self = .annual
+            default:
+                if let unit = subscriptionUnit {
+                    switch unit {
+                    case .week:
+                        self = .weekly
+                    case .month:
+                        self = .monthly
+                    case .year:
+                        self = .annual
+                    default:
+                        self = .unknown
+                    }
+                } else {
+                    self = .unknown
+                }
+            }
         }
     }
 }
