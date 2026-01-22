@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>API_BASE_URL</key>
+	<string>$(API_SCHEME)://$(API_HOST_AND_PORT)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -16,30 +18,6 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>SUPABASE_URL</key>
-	<string>$(SUPABASE_SCHEME)://$(SUPABASE_HOST)</string>
-	<key>SUPABASE_ANON_KEY</key>
-	<string>$(SUPABASE_ANON_KEY)</string>
-	<key>API_BASE_URL</key>
-	<string>$(API_SCHEME)://$(API_HOST_AND_PORT)</string>
-	<key>GOOGLE_IOS_CLIENT_ID</key>
-	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
-	<key>GOOGLE_SERVER_CLIENT_ID</key>
-	<string>$(GOOGLE_SERVER_CLIENT_ID)</string>
-	<key>REVENUECAT_API_KEY</key>
-	<string>$(REVENUECAT_API_KEY)</string>
-	<key>SUPPORT_EMAIL</key>
-	<string>support@wovenlabs.net</string>
-	<key>PRIVACY_POLICY_URL</key>
-	<string>https://www.langlife.app/privacy</string>
-	<key>TERMS_OF_SERVICE_URL</key>
-	<string>https://www.langlife.app/terms</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>We use the microphone so you can practice speaking the scene lines.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>We use speech recognition to compare what you said with the scene text.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -51,31 +29,17 @@
 			</array>
 		</dict>
 	</array>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>GOOGLE_IOS_CLIENT_ID</key>
+	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
+	<key>GOOGLE_SERVER_CLIENT_ID</key>
+	<string>$(GOOGLE_SERVER_CLIENT_ID)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>localhost</key>
+			<key>127.0.0.1</key>
 			<dict>
 				<key>NSIncludesSubdomains</key>
 				<true/>
@@ -96,7 +60,7 @@
 				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 			</dict>
-			<key>127.0.0.1</key>
+			<key>localhost</key>
 			<dict>
 				<key>NSIncludesSubdomains</key>
 				<true/>
@@ -105,5 +69,41 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We use the microphone so you can practice speaking the scene lines.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>We use speech recognition to compare what you said with the scene text.</string>
+	<key>PRIVACY_POLICY_URL</key>
+	<string>https://www.langlife.app/privacy</string>
+	<key>REVENUECAT_API_KEY</key>
+	<string>$(REVENUECAT_API_KEY)</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>SUPABASE_URL</key>
+	<string>$(SUPABASE_SCHEME)://$(SUPABASE_HOST)</string>
+	<key>SUPPORT_EMAIL</key>
+	<string>support@wovenlabs.net</string>
+	<key>TERMS_OF_SERVICE_URL</key>
+	<string>https://www.langlife.app/terms</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

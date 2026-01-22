@@ -26,6 +26,8 @@ struct SpeakSceneDetailView: View {
     @State private var contentMetrics: ScrollContentMetrics = .zero
     @State private var isNearBottom = true
     @State private var isMicPulseExpanded = false
+    @State private var isHoldingMic = false
+    @State private var isStartingMic = false
     private let scrollBottomSpacerHeight: CGFloat = 140
     private let micButtonSize = CGSize(width: 132, height: 64)
     private let micCornerRadius: CGFloat = 22
@@ -34,133 +36,149 @@ struct SpeakSceneDetailView: View {
     let onDelete: (SpeakScene) -> Void
 
     var body: some View {
-        sceneContent
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle(scene.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button(role: .destructive) {
-                        isDeleteConfirmationPresented = true
+        sceneChrome
+    }
+
+    private var sceneChrome: some View {
+        sceneLifecycle
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(scene.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(role: .destructive) {
+                            isDeleteConfirmationPresented = true
+                        } label: {
+                            Label("Delete scene", systemImage: "trash")
+                        }
                     } label: {
-                        Label("Delete scene", systemImage: "trash")
+                        Image(systemName: "ellipsis.circle")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("Scene actions")
-                .disabled(isDeletingScene)
-            }
-        }
-        .confirmationDialog(
-            "Delete this scene?",
-            isPresented: $isDeleteConfirmationPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Delete scene", role: .destructive) {
-                Task {
-                    await deleteScene()
+                    .accessibilityLabel("Scene actions")
+                    .disabled(isDeletingScene)
                 }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This action cannot be undone.")
-        }
-        .task(id: scene.id) {
-            speechService.reset()
-            lastAutoPlayedStep = nil
-            transcriptTranslations = [:]
-            transcriptTranslationQueue = TranscriptTranslationQueue()
-            await viewModel.loadOutline(scene: scene, userId: authManager.user?.id)
-        }
-        .onDisappear {
-            transcriptTranslationQueue.finish()
-        }
-        .onChange(of: speechService.partialTranscript) { _, transcript in
-            guard speechService.isRecording, let key = viewModel.activeSpeechKey else { return }
-            viewModel.updateSpeechTranscript(transcript, for: key)
-        }
-        .onChange(of: speechService.finalTranscript) { _, transcript in
-            guard let transcript, let key = viewModel.activeSpeechKey else { return }
-            guard viewModel.speechAttempts[key]?.status == .listening else { return }
-            guard let line = viewModel.line(for: key) else { return }
-            Task {
-                await viewModel.finalizeSpeech(transcript: transcript, target: line.chinese, for: key)
-                if let resolvedTranscript = viewModel.speechAttempts[key]?.transcript {
-                    await queueTranscriptTranslation(for: key, transcript: resolvedTranscript)
+            .confirmationDialog(
+                "Delete this scene?",
+                isPresented: $isDeleteConfirmationPresented,
+                titleVisibility: .visible
+            ) {
+                Button("Delete scene", role: .destructive) {
+                    Task {
+                        await deleteScene()
+                    }
                 }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This action cannot be undone.")
             }
-        }
-        .onChange(of: speechService.issue) { _, issue in
-            guard issue != nil, let key = viewModel.activeSpeechKey else { return }
-            viewModel.cancelSpeech(for: key)
-        }
-        .onChange(of: viewModel.latestLoadedTurnStep) { _, step in
-            guard let step else { return }
-            guard step != lastAutoPlayedStep else { return }
-            guard !speechService.isRecording else { return }
-            guard let turn = viewModel.turns.first(where: { $0.step == step }) else { return }
-            let trimmed = turn.aiLine.chinese.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            lastAutoPlayedStep = step
-            Task {
-                ttsService.stop()
-                await ttsService.play(text: trimmed)
-            }
-        }
-        .onAppear {
-            updateMicPulseState()
-        }
-        .onChange(of: speechService.isRecording) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: viewModel.activeSpeechKey) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: viewModel.turns) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: viewModel.isLoadingTurn) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: ttsService.isPlaying) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: ttsService.isLoading) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: reduceMotion) { _, _ in
-            updateMicPulseState()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            speechService.refreshAuthorizationState()
-        }
-        .translationTask(
-            source: Locale.Language(identifier: "zh-Hant"),
-            target: Locale.Language(identifier: "en")
-        ) { session in
-            await runTranscriptTranslationLoop(using: session)
-        }
-        .sheet(isPresented: $isOutlinePresented) {
-            NavigationStack {
-                outlineContent
-                    .navigationTitle("Outline")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") {
-                                isOutlinePresented = false
+            .sheet(isPresented: $isOutlinePresented) {
+                NavigationStack {
+                    outlineContent
+                        .navigationTitle("Outline")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") {
+                                    isOutlinePresented = false
+                                }
                             }
                         }
-                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
+    }
+
+    private var sceneLifecycle: some View {
+        sceneContent
+            .task(id: scene.id) {
+                speechService.reset()
+                lastAutoPlayedStep = nil
+                transcriptTranslations = [:]
+                transcriptTranslationQueue = TranscriptTranslationQueue()
+                await viewModel.loadOutline(scene: scene, userId: authManager.user?.id)
+            }
+            .onDisappear {
+                transcriptTranslationQueue.finish()
+            }
+            .onChange(of: speechService.partialTranscript) { _, transcript in
+                guard speechService.isRecording, let key = viewModel.activeSpeechKey else { return }
+                viewModel.updateSpeechTranscript(transcript, for: key)
+            }
+            .onChange(of: speechService.finalTranscript) { _, transcript in
+                guard let transcript, let key = viewModel.activeSpeechKey else { return }
+                guard viewModel.speechAttempts[key]?.status == .listening else { return }
+                guard let line = viewModel.line(for: key) else { return }
+                Task {
+                    await viewModel.finalizeSpeech(transcript: transcript, target: line.chinese, for: key)
+                    if let resolvedTranscript = viewModel.speechAttempts[key]?.transcript {
+                        await MainActor.run {
+                            queueTranscriptTranslation(for: key, transcript: resolvedTranscript)
+                        }
+                    }
+                }
+            }
+            .onChange(of: speechService.issue) { _, issue in
+                guard issue != nil, let key = viewModel.activeSpeechKey else { return }
+                viewModel.cancelSpeech(for: key)
+            }
+            .onChange(of: viewModel.latestLoadedTurnStep) { _, step in
+                guard let step else { return }
+                guard step != lastAutoPlayedStep else { return }
+                guard !speechService.isRecording else { return }
+                guard let turn = viewModel.turns.first(where: { $0.step == step }) else { return }
+                let trimmed = turn.aiLine.chinese.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                lastAutoPlayedStep = step
+                Task {
+                    ttsService.stop()
+                    await ttsService.play(text: trimmed)
+                }
+            }
+            .onAppear {
+                updateMicPulseState()
+            }
+            .onChange(of: speechService.isRecording) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: isHoldingMic) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: isStartingMic) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: viewModel.activeSpeechKey) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: viewModel.turns) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: viewModel.isLoadingTurn) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: ttsService.isPlaying) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: ttsService.isLoading) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: reduceMotion) { _, _ in
+                updateMicPulseState()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                speechService.refreshAuthorizationState()
+            }
+            .translationTask(
+                source: Locale.Language(identifier: "zh-Hant"),
+                target: Locale.Language(identifier: "en")
+            ) { session in
+                await runTranscriptTranslationLoop(using: session)
+            }
     }
 
     private var outlineContent: some View {
@@ -297,8 +315,8 @@ struct SpeakSceneDetailView: View {
                 scrollViewHeight = height
                 updateIsNearBottom()
             }
-            .onChange(of: viewModel.latestLoadedTurnStep) { _, step in
-                guard let step else { return }
+            .onChange(of: viewModel.latestLoadedTurnStep) { _, _ in
+                guard viewModel.latestLoadedTurnStep != nil else { return }
                 guard isNearBottom else { return }
                 Task {
                     await Task.yield()
@@ -309,74 +327,24 @@ struct SpeakSceneDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Button {
-                    isOutlinePresented = true
-                } label: {
-                    Image(systemName: "list.clipboard")
-                        .font(.title2)
-                        .foregroundStyle(.primary)
-                        .frame(width: 68, height: 68)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Outline")
-
-                Spacer()
-
-                Button {
-                        Task {
-                            await handleMicTap()
-                        }
-                    } label: {
-                        ZStack {
-                            if shouldPulseMic {
-                                RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
-                                    .fill(AppColors.micPulseHalo.opacity(reduceMotion ? 0.3 : (isMicPulseExpanded ? 0.32 : 0.2)))
-                                    .frame(width: micButtonSize.width, height: micButtonSize.height)
-                                    .scaleEffect(reduceMotion ? 1.1 : (isMicPulseExpanded ? 1.18 : 1.06))
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-
-                                RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
-                                    .stroke(AppColors.micPulseHalo.opacity(reduceMotion ? 0.7 : 0.85), lineWidth: 5)
-                                    .frame(width: micButtonSize.width, height: micButtonSize.height)
-                                    .scaleEffect(reduceMotion ? 1.1 : (isMicPulseExpanded ? 1.18 : 1.06))
-                                    .opacity(reduceMotion ? 0.85 : (isMicPulseExpanded ? 0.2 : 0.7))
-                                    .shadow(color: AppColors.micPulseHalo.opacity(0.65), radius: 14, x: 0, y: 0)
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-                            }
-
-                            Image(systemName: speechService.isRecording ? "stop.fill" : "mic.fill")
-                                .font(.title2)
-                                .foregroundStyle(AppColors.onAccent)
-                                .frame(width: micButtonSize.width, height: micButtonSize.height)
-                                .background(AppColors.accent, in: RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
-                                        .stroke(AppColors.onAccent.opacity(0.25), lineWidth: 1)
-                                )
-                                .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
-                        }
+            SpeakSceneBottomBar(
+                isOutlinePresented: $isOutlinePresented,
+                shouldPulse: shouldPulseMic,
+                isPulseExpanded: isMicPulseExpanded,
+                reduceMotion: reduceMotion,
+                isRecording: speechService.isRecording,
+                micButtonSize: micButtonSize,
+                micCornerRadius: micCornerRadius,
+                isHoldingMic: $isHoldingMic,
+                onStartHold: {
+                    Task {
+                        await startHoldToSpeak()
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Record")
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 16)
-            .background {
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 20,
-                    bottomLeadingRadius: 0,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: 20
-                )
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea(edges: .bottom)
-            }
+                },
+                onStopHold: {
+                    stopHoldToSpeak()
+                }
+            )
         }
         .simultaneousGesture(
             TapGesture().onEnded {
@@ -387,22 +355,34 @@ struct SpeakSceneDetailView: View {
         )
     }
 
-    private func handleMicTap() async {
-        if speechService.isRecording {
-            speechService.stopAndFinalize()
-            return
-        }
-
+    @MainActor
+    private func startHoldToSpeak() async {
+        guard !isStartingMic else { return }
+        guard !speechService.isRecording else { return }
         guard let target = viewModel.currentPracticeTarget else { return }
+
+        isStartingMic = true
+        defer { isStartingMic = false }
+
         if ttsService.isPlaying {
             ttsService.stop()
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
-        await resetTranscriptTranslation(for: target.key)
+        resetTranscriptTranslation(for: target.key)
         viewModel.beginSpeech(for: target.key)
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
         if !started {
             viewModel.cancelSpeech(for: target.key)
+            return
+        }
+        if !isHoldingMic {
+            stopHoldToSpeak()
+        }
+    }
+
+    private func stopHoldToSpeak() {
+        if speechService.isRecording {
+            _ = speechService.stopAndFinalize()
         }
     }
 
@@ -460,12 +440,13 @@ struct SpeakSceneDetailView: View {
         return false
     }
 
+    @MainActor
     private func startSpeech(for key: SpeechKey) async {
         if ttsService.isPlaying {
             ttsService.stop()
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
-        await resetTranscriptTranslation(for: key)
+        resetTranscriptTranslation(for: key)
         viewModel.beginSpeech(for: key)
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
         if !started {
@@ -499,6 +480,8 @@ struct SpeakSceneDetailView: View {
         guard !ttsService.isPlaying else { return false }
         guard !ttsService.isLoading else { return false }
         guard !speechService.isRecording else { return false }
+        guard !isHoldingMic else { return false }
+        guard !isStartingMic else { return false }
         guard viewModel.activeSpeechKey == nil else { return false }
         guard !viewModel.isLoadingTurn else { return false }
         return true
@@ -583,6 +566,133 @@ struct SpeakSceneDetailView: View {
             updated.isTranslating = false
             updated.error = "Unable to translate right now."
             transcriptTranslations[request.key] = updated
+        }
+    }
+}
+
+private struct MicHoldToSpeakButton: View {
+    let shouldPulse: Bool
+    let isPulseExpanded: Bool
+    let reduceMotion: Bool
+    let isRecording: Bool
+    let micButtonSize: CGSize
+    let micCornerRadius: CGFloat
+    @Binding var isHoldingMic: Bool
+    let onStartHold: () -> Void
+    let onStopHold: () -> Void
+
+    var body: some View {
+        ZStack {
+            if shouldPulse {
+                RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                    .fill(AppColors.micPulseHalo.opacity(reduceMotion ? 0.3 : (isPulseExpanded ? 0.32 : 0.2)))
+                    .frame(width: micButtonSize.width, height: micButtonSize.height)
+                    .scaleEffect(reduceMotion ? 1.1 : (isPulseExpanded ? 1.18 : 1.06))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+
+                RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                    .stroke(AppColors.micPulseHalo.opacity(reduceMotion ? 0.7 : 0.85), lineWidth: 5)
+                    .frame(width: micButtonSize.width, height: micButtonSize.height)
+                    .scaleEffect(reduceMotion ? 1.1 : (isPulseExpanded ? 1.18 : 1.06))
+                    .opacity(reduceMotion ? 0.85 : (isPulseExpanded ? 0.2 : 0.7))
+                    .shadow(color: AppColors.micPulseHalo.opacity(0.65), radius: 14, x: 0, y: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+
+            Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+                .font(.title2)
+                .foregroundStyle(AppColors.onAccent)
+                .frame(width: micButtonSize.width, height: micButtonSize.height)
+                .background(AppColors.accent, in: RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                        .stroke(AppColors.onAccent.opacity(0.25), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !isHoldingMic else { return }
+                    isHoldingMic = true
+                    onStartHold()
+                }
+                .onEnded { _ in
+                    isHoldingMic = false
+                    onStopHold()
+                }
+        )
+        .accessibilityLabel("Hold to record")
+        .accessibilityHint("Press and hold to speak; release to stop.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            if isRecording {
+                isHoldingMic = false
+                onStopHold()
+            } else {
+                isHoldingMic = true
+                onStartHold()
+            }
+        }
+    }
+}
+
+private struct SpeakSceneBottomBar: View {
+    @Binding var isOutlinePresented: Bool
+    let shouldPulse: Bool
+    let isPulseExpanded: Bool
+    let reduceMotion: Bool
+    let isRecording: Bool
+    let micButtonSize: CGSize
+    let micCornerRadius: CGFloat
+    @Binding var isHoldingMic: Bool
+    let onStartHold: () -> Void
+    let onStopHold: () -> Void
+
+    var body: some View {
+        HStack {
+            Button {
+                isOutlinePresented = true
+            } label: {
+                Image(systemName: "list.clipboard")
+                    .font(.title2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 68, height: 68)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Outline")
+
+            Spacer()
+
+            MicHoldToSpeakButton(
+                shouldPulse: shouldPulse,
+                isPulseExpanded: isPulseExpanded,
+                reduceMotion: reduceMotion,
+                isRecording: isRecording,
+                micButtonSize: micButtonSize,
+                micCornerRadius: micCornerRadius,
+                isHoldingMic: $isHoldingMic,
+                onStartHold: onStartHold,
+                onStopHold: onStopHold
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        .background {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 20,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 20
+            )
+            .fill(.ultraThinMaterial)
+            .ignoresSafeArea(edges: .bottom)
         }
     }
 }
@@ -672,7 +782,8 @@ private struct ConversationPanel: View {
             ForEach(orderedTurns) { turn in
                 VStack(alignment: .leading, spacing: 16) {
                     let sequence = lineSequence(for: turn)
-                    ForEach(Array(sequence.enumerated()), id: \.offset) { _, entry in
+                    ForEach(sequence.indices, id: \.self) { index in
+                        let entry = sequence[index]
                         let key = TranslationKey(step: turn.step, role: entry.role)
                         let speechKey = SpeechKey(step: turn.step, role: entry.role)
                         let isActiveSpeech = activeSpeechKey == speechKey
@@ -958,38 +1069,12 @@ private struct ConversationBubble: View {
                 }
             }
             .overlayPreferenceValue(GlossTokenBoundsKey.self) { anchors in
-                GeometryReader { proxy in
-                    if let activeGlossIndex,
-                       let tokens,
-                       tokens.indices.contains(activeGlossIndex),
-                       let anchor = anchors[activeGlossIndex] {
-                        let english = tokens[activeGlossIndex].english
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        let frame = proxy[anchor]
-                        let maxWidth = min(220, proxy.size.width - 16)
-                        let measuredWidth = calloutSize.width > 0 ? calloutSize.width : maxWidth
-                        let centerX = min(
-                            max(frame.midX, measuredWidth / 2 + 8),
-                            proxy.size.width - measuredWidth / 2 - 8
-                        )
-                        let centerY = calloutCenterY(frame: frame, proxySize: proxy.size)
-
-                        if !english.isEmpty {
-                            GlossCallout(text: english, maxWidth: maxWidth)
-                                .background(
-                                    GeometryReader { calloutProxy in
-                                        Color.clear.preference(
-                                            key: GlossCalloutSizeKey.self,
-                                            value: calloutProxy.size
-                                        )
-                                    }
-                                )
-                                .position(x: centerX, y: centerY)
-                                .allowsHitTesting(false)
-                                .zIndex(1)
-                        }
-                    }
-                }
+                GlossCalloutOverlay(
+                    anchors: anchors,
+                    tokens: tokens,
+                    activeGlossIndex: activeGlossIndex,
+                    calloutSize: calloutSize
+                )
             }
             .onChange(of: activeGlossSelection) { _, _ in
                 calloutSize = .zero
@@ -1056,6 +1141,49 @@ private struct ConversationBubble: View {
         }
 
         return attributed
+    }
+
+}
+
+private struct GlossCalloutOverlay: View {
+    let anchors: [Int: Anchor<CGRect>]
+    let tokens: [SpeakGlossToken]?
+    let activeGlossIndex: Int?
+    let calloutSize: CGSize
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let activeGlossIndex,
+               let tokens,
+               tokens.indices.contains(activeGlossIndex),
+               let anchor = anchors[activeGlossIndex] {
+                let english = tokens[activeGlossIndex].english
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let frame = proxy[anchor]
+                let maxWidth = min(220, proxy.size.width - 16)
+                let measuredWidth = calloutSize.width > 0 ? calloutSize.width : maxWidth
+                let centerX = min(
+                    max(frame.midX, measuredWidth / 2 + 8),
+                    proxy.size.width - measuredWidth / 2 - 8
+                )
+                let centerY = calloutCenterY(frame: frame, proxySize: proxy.size)
+
+                if !english.isEmpty {
+                    GlossCallout(text: english, maxWidth: maxWidth)
+                        .background(
+                            GeometryReader { calloutProxy in
+                                Color.clear.preference(
+                                    key: GlossCalloutSizeKey.self,
+                                    value: calloutProxy.size
+                                )
+                            }
+                        )
+                        .position(x: centerX, y: centerY)
+                        .allowsHitTesting(false)
+                        .zIndex(1)
+                }
+            }
+        }
     }
 
     private func calloutCenterY(frame: CGRect, proxySize: CGSize) -> CGFloat {
