@@ -49,12 +49,26 @@ struct langlife_ios_nativeApp: App {
                 }
                 .task {
                     subscriptionManager.start()
+                    await subscriptionManager.syncAppUser(
+                        id: authManager.user?.id.uuidString,
+                        email: authManager.user?.email
+                    )
                     await subscriptionManager.refresh()
-                    await subscriptionManager.syncAppUser(id: authManager.user?.id.uuidString)
                 }
                 .onChange(of: authManager.user?.id) { _, newValue in
                     Task {
-                        await subscriptionManager.syncAppUser(id: newValue?.uuidString)
+                        await subscriptionManager.syncAppUser(
+                            id: newValue?.uuidString,
+                            email: authManager.user?.email
+                        )
+                    }
+                }
+                .onChange(of: authManager.user?.email) { _, newValue in
+                    Task {
+                        await subscriptionManager.syncAppUser(
+                            id: authManager.user?.id.uuidString,
+                            email: newValue
+                        )
                     }
                 }
         }

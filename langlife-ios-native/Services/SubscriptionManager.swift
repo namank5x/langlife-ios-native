@@ -1,10 +1,15 @@
 import Combine
 import Foundation
+import OSLog
 import RevenueCat
 
 @MainActor
-final class SubscriptionManager: ObservableObject {
+final class SubscriptionManager: NSObject, ObservableObject, PurchasesDelegate {
     static let shared = SubscriptionManager()
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.langlife",
+        category: "SubscriptionManager"
+    )
 
     @Published private(set) var offerings: Offerings?
     @Published private(set) var customerInfo: CustomerInfo?
@@ -18,13 +23,22 @@ final class SubscriptionManager: ObservableObject {
     private var currentAppUserID: String?
     private var productPlanInfoById: [String: PlanDescriptor] = [:]
 
+    override init() {
+        super.init()
+    }
+
     func start() {
         guard customerInfoTask == nil else { return }
+        Purchases.shared.delegate = self
         customerInfoTask = Task { @MainActor [weak self] in
             for await info in Purchases.shared.customerInfoStream {
                 self?.apply(customerInfo: info)
             }
         }
+    }
+
+    deinit {
+        customerInfoTask?.cancel()
     }
 
     func refresh(fetchPolicy: CacheFetchPolicy = .default) async {
@@ -40,19 +54,24 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
-    func syncAppUser(id: String?) async {
-        guard currentAppUserID != id else { return }
+    func syncAppUser(id: String?, email: String?) async {
+        if currentAppUserID == id {
+            updateSubscriberAttributes(userId: id, email: email)
+            return
+        }
         currentAppUserID = id
 
         do {
             if let id, !id.isEmpty {
                 let result = try await Purchases.shared.logIn(id)
                 apply(customerInfo: result.customerInfo)
+                updateSubscriberAttributes(userId: id, email: email)
             } else {
                 let info = try await Purchases.shared.logOut()
                 apply(customerInfo: info)
             }
         } catch {
+            Self.logger.error("RevenueCat logIn/logOut failed desc=\(error.localizedDescription, privacy: .public)")
             lastErrorMessage = error.localizedDescription
         }
     }
@@ -68,8 +87,20 @@ final class SubscriptionManager: ObservableObject {
             apply(customerInfo: result.customerInfo)
         } catch ErrorCode.purchaseCancelledError {
             return
+        } catch ErrorCode.receiptAlreadyInUseError {
+            lastErrorMessage = "This purchase belongs to another account. Please sign in with the original account or contact support to transfer it."
+        } catch ErrorCode.paymentPendingError {
+            lastErrorMessage = "Your purchase is pending approval (e.g., parental consent). Please check back later."
         } catch {
             lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func updateSubscriberAttributes(userId: String?, email: String?) {
+        guard let userId else { return }
+        Purchases.shared.attribution.setAttributes(["supabase_user_id": userId])
+        if let email, !email.isEmpty {
+            Purchases.shared.attribution.setEmail(email)
         }
     }
 
@@ -176,6 +207,43 @@ final class SubscriptionManager: ObservableObject {
                     }
                 } else {
                     self = .unknown
+                }
+            }
+        }
+    }
+}
+
+// MARK: - PurchasesDelegate
+
+extension SubscriptionManager {
+    nonisolated func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
+        Task { @MainActor in
+            apply(customerInfo: customerInfo)
+        }
+    }
+
+    nonisolated func purchases(
+        _ purchases: Purchases,
+        readyForPromotedProduct product: StoreProduct,
+        purchase startPurchase: @escaping StartPurchaseBlock
+    ) {
+        Task { @MainActor in
+            guard !isProcessingPurchase else { return }
+            isProcessingPurchase = true
+            startPurchase { transaction, customerInfo, error, cancelled in
+                Task { @MainActor [weak self] in
+                    defer { self?.isProcessingPurchase = false }
+                    if let error {
+                        Self.logger.error("Promoted purchase failed: \(error.localizedDescription, privacy: .public)")
+                        self?.lastErrorMessage = error.localizedDescription
+                        return
+                    }
+                    if cancelled {
+                        return
+                    }
+                    if let customerInfo {
+                        self?.apply(customerInfo: customerInfo)
+                    }
                 }
             }
         }
