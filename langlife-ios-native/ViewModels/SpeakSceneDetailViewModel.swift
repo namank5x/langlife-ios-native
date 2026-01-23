@@ -105,12 +105,22 @@ final class SpeakSceneDetailViewModel: ObservableObject {
 
     func beginSpeech(for key: SpeechKey) {
         activeSpeechKey = key
-        speechAttempts[key] = SpeechAttempt(transcript: "", status: .listening, score: nil)
+        speechAttempts[key] = SpeechAttempt(transcript: "", status: .preparing, score: nil)
     }
 
     func updateSpeechTranscript(_ transcript: String, for key: SpeechKey) {
         guard activeSpeechKey == key else { return }
-        speechAttempts[key] = SpeechAttempt(transcript: transcript, status: .listening, score: nil)
+        speechAttempts[key] = SpeechAttempt(
+            transcript: transcript,
+            status: .listening,
+            score: nil
+        )
+    }
+
+    func updateSpeechStatus(_ status: SpeechAttemptStatus, for key: SpeechKey) {
+        var attempt = speechAttempts[key] ?? SpeechAttempt(transcript: "", status: status, score: nil)
+        attempt.status = status
+        speechAttempts[key] = attempt
     }
 
     func finalizeSpeech(transcript: String, target: String, for key: SpeechKey) async {
@@ -142,7 +152,20 @@ final class SpeakSceneDetailViewModel: ObservableObject {
         if activeSpeechKey == key {
             activeSpeechKey = nil
         }
-        speechAttempts.removeValue(forKey: key)
+        var attempt = speechAttempts[key] ?? SpeechAttempt(transcript: "", status: .cancelled, score: nil)
+        attempt.status = .cancelled
+        speechAttempts[key] = attempt
+    }
+
+    func failSpeech(for key: SpeechKey, message: String) {
+        if activeSpeechKey == key {
+            activeSpeechKey = nil
+        }
+        speechAttempts[key] = SpeechAttempt(
+            transcript: speechAttempts[key]?.transcript ?? "",
+            status: .error(message),
+            score: nil
+        )
     }
 
     func loadNextTurn() async {
@@ -295,9 +318,14 @@ struct SpeechKey: Hashable {
 }
 
 enum SpeechAttemptStatus: Equatable {
+    case preparing
+    case connecting
     case listening
+    case processing
     case passed
     case failed
+    case cancelled
+    case error(String)
 }
 
 struct SpeechAttempt: Equatable {

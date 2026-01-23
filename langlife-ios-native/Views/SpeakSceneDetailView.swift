@@ -3,6 +3,7 @@ import SwiftUI
 import Translation
 import _Translation_SwiftUI
 import UIKit
+import CoreHaptics
 
 struct SpeakSceneDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,8 +27,11 @@ struct SpeakSceneDetailView: View {
     @State private var contentMetrics: ScrollContentMetrics = .zero
     @State private var isNearBottom = true
     @State private var isMicPulseExpanded = false
-    @State private var isHoldingMic = false
     @State private var isStartingMic = false
+    private let startHapticGenerator = UIImpactFeedbackGenerator(style: .medium)
+    private let stopHapticGenerator = UIImpactFeedbackGenerator(style: .light)
+    private let cancelHapticGenerator = UIImpactFeedbackGenerator(style: .soft)
+    private let errorHapticGenerator = UINotificationFeedbackGenerator()
     private let scrollBottomSpacerHeight: CGFloat = 140
     private let micButtonSize = CGSize(width: 132, height: 64)
     private let micCornerRadius: CGFloat = 22
@@ -111,8 +115,8 @@ struct SpeakSceneDetailView: View {
             }
             .onChange(of: speechService.finalTranscript) { _, transcript in
                 guard let transcript, let key = viewModel.activeSpeechKey else { return }
-                guard viewModel.speechAttempts[key]?.status == .listening else { return }
                 guard let line = viewModel.line(for: key) else { return }
+                viewModel.updateSpeechStatus(.processing, for: key)
                 Task {
                     await viewModel.finalizeSpeech(transcript: transcript, target: line.chinese, for: key)
                     if let resolvedTranscript = viewModel.speechAttempts[key]?.transcript {
@@ -123,8 +127,11 @@ struct SpeakSceneDetailView: View {
                 }
             }
             .onChange(of: speechService.issue) { _, issue in
+                if issue != nil {
+                    performHaptic(.error)
+                }
                 guard issue != nil, let key = viewModel.activeSpeechKey else { return }
-                viewModel.cancelSpeech(for: key)
+                viewModel.failSpeech(for: key, message: issue?.message ?? "Speech unavailable right now.")
             }
             .onChange(of: viewModel.latestLoadedTurnStep) { _, step in
                 guard let step else { return }
@@ -140,12 +147,15 @@ struct SpeakSceneDetailView: View {
                 }
             }
             .onAppear {
+                prepareAllHaptics()
                 updateMicPulseState()
             }
             .onChange(of: speechService.isRecording) { _, _ in
-                updateMicPulseState()
-            }
-            .onChange(of: isHoldingMic) { _, _ in
+                if !speechService.isRecording {
+                    if let key = viewModel.activeSpeechKey {
+                        viewModel.updateSpeechStatus(.processing, for: key)
+                    }
+                }
                 updateMicPulseState()
             }
             .onChange(of: isStartingMic) { _, _ in
@@ -170,7 +180,14 @@ struct SpeakSceneDetailView: View {
                 updateMicPulseState()
             }
             .onChange(of: scenePhase) { _, phase in
-                guard phase == .active else { return }
+                guard phase == .active else {
+                    speechService.cancelRecording()
+                    if let key = viewModel.activeSpeechKey {
+                        viewModel.cancelSpeech(for: key)
+                    }
+                    return
+                }
+                prepareAllHaptics()
                 speechService.refreshAuthorizationState()
             }
             .translationTask(
@@ -333,16 +350,13 @@ struct SpeakSceneDetailView: View {
                 isPulseExpanded: isMicPulseExpanded,
                 reduceMotion: reduceMotion,
                 isRecording: speechService.isRecording,
+                isStartingMic: isStartingMic,
+                accessibilityLabel: micAccessibilityLabel,
+                accessibilityHint: micAccessibilityHint,
                 micButtonSize: micButtonSize,
                 micCornerRadius: micCornerRadius,
-                isHoldingMic: $isHoldingMic,
-                onStartHold: {
-                    Task {
-                        await startHoldToSpeak()
-                    }
-                },
-                onStopHold: {
-                    stopHoldToSpeak()
+                onTap: {
+                    handleMicTap()
                 }
             )
         }
@@ -356,11 +370,37 @@ struct SpeakSceneDetailView: View {
     }
 
     @MainActor
-    private func startHoldToSpeak() async {
+    private func handleMicTap() {
+        let isStopping = speechService.isRecording || isStartingMic
+        if isStopping {
+            prepareHaptic(for: .stop)
+            performHaptic(.stop)
+        } else {
+            prepareHaptic(for: .start)
+            performHaptic(.start)
+        }
+        Task {
+            await toggleMic()
+        }
+    }
+
+    @MainActor
+    private func toggleMic() async {
+        if speechService.isRecording || isStartingMic {
+            stopRecording()
+            return
+        }
+        await startRecording()
+    }
+
+    @MainActor
+    private func startRecording() async {
         guard !isStartingMic else { return }
         guard !speechService.isRecording else { return }
         guard let target = viewModel.currentPracticeTarget else { return }
+        let key = target.key
 
+        viewModel.beginSpeech(for: key)
         isStartingMic = true
         defer { isStartingMic = false }
 
@@ -368,21 +408,48 @@ struct SpeakSceneDetailView: View {
             ttsService.stop()
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
+
         resetTranscriptTranslation(for: target.key)
-        viewModel.beginSpeech(for: target.key)
+        viewModel.updateSpeechStatus(.connecting, for: key)
+
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
-        if !started {
-            viewModel.cancelSpeech(for: target.key)
+
+        guard viewModel.activeSpeechKey == key else {
+            if speechService.isRecording {
+                speechService.cancelRecording()
+            }
             return
         }
-        if !isHoldingMic {
-            stopHoldToSpeak()
+
+        if started {
+            viewModel.updateSpeechStatus(.listening, for: key)
+        } else {
+            let message = speechService.issue?.message ?? "Could not start the microphone."
+            viewModel.failSpeech(for: key, message: message)
+            performHaptic(.error)
         }
     }
 
-    private func stopHoldToSpeak() {
+    @MainActor
+    private func stopRecording() {
+        if isStartingMic {
+            speechService.cancelRecording()
+            if let key = viewModel.activeSpeechKey {
+                viewModel.cancelSpeech(for: key)
+            }
+            isStartingMic = false
+            performHaptic(.cancel)
+            return
+        }
+
         if speechService.isRecording {
+            if let key = viewModel.activeSpeechKey {
+                viewModel.updateSpeechStatus(.processing, for: key)
+            }
             _ = speechService.stopAndFinalize()
+            performHaptic(.stop)
+        } else if let key = viewModel.activeSpeechKey {
+            viewModel.cancelSpeech(for: key)
         }
     }
 
@@ -442,15 +509,28 @@ struct SpeakSceneDetailView: View {
 
     @MainActor
     private func startSpeech(for key: SpeechKey) async {
+        viewModel.beginSpeech(for: key)
+        isStartingMic = true
+        defer { isStartingMic = false }
         if ttsService.isPlaying {
             ttsService.stop()
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
         resetTranscriptTranslation(for: key)
-        viewModel.beginSpeech(for: key)
+        viewModel.updateSpeechStatus(.connecting, for: key)
         let started = await speechService.startRecording(localeIdentifier: "zh-TW")
-        if !started {
-            viewModel.cancelSpeech(for: key)
+        guard viewModel.activeSpeechKey == key else {
+            if speechService.isRecording {
+                speechService.cancelRecording()
+            }
+            return
+        }
+        if started {
+            viewModel.updateSpeechStatus(.listening, for: key)
+        } else {
+            let message = speechService.issue?.message ?? "Could not start the microphone."
+            viewModel.failSpeech(for: key, message: message)
+            performHaptic(.error)
         }
     }
 
@@ -480,11 +560,30 @@ struct SpeakSceneDetailView: View {
         guard !ttsService.isPlaying else { return false }
         guard !ttsService.isLoading else { return false }
         guard !speechService.isRecording else { return false }
-        guard !isHoldingMic else { return false }
         guard !isStartingMic else { return false }
         guard viewModel.activeSpeechKey == nil else { return false }
         guard !viewModel.isLoadingTurn else { return false }
         return true
+    }
+
+    private var micAccessibilityLabel: String {
+        if isStartingMic {
+            return "Preparing microphone"
+        }
+        if speechService.isRecording {
+            return "Stop recording"
+        }
+        return "Start recording"
+    }
+
+    private var micAccessibilityHint: String {
+        if speechService.isRecording {
+            return "Tap to stop recording"
+        }
+        if isStartingMic {
+            return "Preparing microphone"
+        }
+        return "Tap to start recording"
     }
 
     private func updateMicPulseState() {
@@ -502,6 +601,46 @@ struct SpeakSceneDetailView: View {
         withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
             isMicPulseExpanded = true
         }
+    }
+
+    private enum MicHaptic {
+        case start
+        case stop
+        case cancel
+        case error
+    }
+
+    private func performHaptic(_ event: MicHaptic) {
+        switch event {
+        case .start:
+            startHapticGenerator.impactOccurred(intensity: 1.0)
+        case .stop:
+            stopHapticGenerator.impactOccurred()
+        case .cancel:
+            cancelHapticGenerator.impactOccurred()
+        case .error:
+            errorHapticGenerator.notificationOccurred(.warning)
+        }
+    }
+
+    private func prepareHaptic(for event: MicHaptic) {
+        switch event {
+        case .start:
+            startHapticGenerator.prepare()
+        case .stop:
+            stopHapticGenerator.prepare()
+        case .cancel:
+            cancelHapticGenerator.prepare()
+        case .error:
+            errorHapticGenerator.prepare()
+        }
+    }
+
+    private func prepareAllHaptics() {
+        prepareHaptic(for: .start)
+        prepareHaptic(for: .stop)
+        prepareHaptic(for: .cancel)
+        prepareHaptic(for: .error)
     }
 
     @MainActor
@@ -575,11 +714,12 @@ private struct MicHoldToSpeakButton: View {
     let isPulseExpanded: Bool
     let reduceMotion: Bool
     let isRecording: Bool
+    let isStartingMic: Bool
+    let accessibilityLabel: String
+    let accessibilityHint: String
     let micButtonSize: CGSize
     let micCornerRadius: CGFloat
-    @Binding var isHoldingMic: Bool
-    let onStartHold: () -> Void
-    let onStopHold: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
         ZStack {
@@ -601,42 +741,26 @@ private struct MicHoldToSpeakButton: View {
                     .accessibilityHidden(true)
             }
 
-            Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                .font(.title2)
-                .foregroundStyle(AppColors.onAccent)
-                .frame(width: micButtonSize.width, height: micButtonSize.height)
-                .background(AppColors.accent, in: RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
-                        .stroke(AppColors.onAccent.opacity(0.25), lineWidth: 1)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+            Button {
+                onTap()
+            } label: {
+                Image(systemName: (isRecording || isStartingMic) ? "stop.fill" : "mic.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppColors.onAccent)
+                    .frame(width: micButtonSize.width, height: micButtonSize.height)
+                    .background(AppColors.accent, in: RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous)
+                            .stroke(AppColors.onAccent.opacity(0.25), lineWidth: 1)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityHint(accessibilityHint)
+            .accessibilityAddTraits(.isButton)
         }
         .contentShape(RoundedRectangle(cornerRadius: micCornerRadius, style: .continuous))
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !isHoldingMic else { return }
-                    isHoldingMic = true
-                    onStartHold()
-                }
-                .onEnded { _ in
-                    isHoldingMic = false
-                    onStopHold()
-                }
-        )
-        .accessibilityLabel("Hold to record")
-        .accessibilityHint("Press and hold to speak; release to stop.")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            if isRecording {
-                isHoldingMic = false
-                onStopHold()
-            } else {
-                isHoldingMic = true
-                onStartHold()
-            }
-        }
     }
 }
 
@@ -646,11 +770,12 @@ private struct SpeakSceneBottomBar: View {
     let isPulseExpanded: Bool
     let reduceMotion: Bool
     let isRecording: Bool
+    let isStartingMic: Bool
+    let accessibilityLabel: String
+    let accessibilityHint: String
     let micButtonSize: CGSize
     let micCornerRadius: CGFloat
-    @Binding var isHoldingMic: Bool
-    let onStartHold: () -> Void
-    let onStopHold: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
         HStack {
@@ -673,11 +798,12 @@ private struct SpeakSceneBottomBar: View {
                 isPulseExpanded: isPulseExpanded,
                 reduceMotion: reduceMotion,
                 isRecording: isRecording,
+                isStartingMic: isStartingMic,
+                accessibilityLabel: accessibilityLabel,
+                accessibilityHint: accessibilityHint,
                 micButtonSize: micButtonSize,
                 micCornerRadius: micCornerRadius,
-                isHoldingMic: $isHoldingMic,
-                onStartHold: onStartHold,
-                onStopHold: onStopHold
+                onTap: onTap
             )
         }
         .frame(maxWidth: .infinity)
@@ -799,7 +925,7 @@ private struct ConversationPanel: View {
                         let resolvedTranslation = translation?.transcript == trimmedTranscript
                             ? translation
                             : nil
-                        let speechStatus = isActiveSpeech ? .listening : attempt?.status
+                        let speechStatus = attempt?.status ?? (isActiveSpeech ? .listening : nil)
                         ConversationBubble(
                             role: entry.role,
                             line: entry.line,
@@ -941,10 +1067,20 @@ private struct ConversationBubble: View {
                 }
 
                 if role == .user, let status = speechStatus {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(status == .listening ? "Listening..." : "You said")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    let presentation = statusPresentation(for: status, score: speechScore)
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let presentation {
+                            HStack(spacing: 8) {
+                                if presentation.showsSpinner {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                        .scaleEffect(0.8)
+                                }
+                                Text(presentation.text)
+                                    .font(.footnote)
+                                    .foregroundStyle(presentation.color)
+                            }
+                        }
 
                         if let transcript = speechTranscript, !transcript.isEmpty {
                             Text(highlightedTranscript(transcript))
@@ -985,18 +1121,19 @@ private struct ConversationBubble: View {
                                     }
                                 }
                             }
+                        } else if case .cancelled = status {
+                            Text("Cancelled.")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        } else if case .error = status {
+                            EmptyView()
+                        } else if presentation?.showsSpinner == true {
+                            EmptyView()
                         } else {
                             Text("Start speaking to compare your line.")
                                 .font(.body)
                                 .foregroundStyle(.secondary)
                         }
-
-                        if let label = statusLabel(for: status, score: speechScore) {
-                            Text(label)
-                                .font(.caption)
-                                .foregroundStyle(status == .passed ? .green : .secondary)
-                        }
-
                     }
                 }
 
@@ -1108,20 +1245,42 @@ private struct ConversationBubble: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func statusLabel(for status: SpeechAttemptStatus, score: Double?) -> String? {
+    private struct StatusPresentation {
+        let text: String
+        let color: Color
+        let showsSpinner: Bool
+    }
+
+    private func statusPresentation(for status: SpeechAttemptStatus, score: Double?) -> StatusPresentation? {
         switch status {
+        case .preparing:
+            return StatusPresentation(text: "Preparing mic...", color: .secondary, showsSpinner: true)
+        case .connecting:
+            return StatusPresentation(text: "Connecting...", color: .secondary, showsSpinner: true)
         case .listening:
-            return nil
+            return StatusPresentation(text: "Listening...", color: .secondary, showsSpinner: true)
+        case .processing:
+            return StatusPresentation(text: "Processing...", color: .secondary, showsSpinner: true)
         case .passed:
+            let text: String
             if let score {
-                return "Great job (\(Int(score * 100))%)"
+                text = "Matched (\(Int(score * 100))%)"
+            } else {
+                text = "Matched"
             }
-            return "Great job"
+            return StatusPresentation(text: text, color: .green, showsSpinner: false)
         case .failed:
+            let text: String
             if let score {
-                return "Almost there (\(Int(score * 100))%)"
+                text = "Try again (\(Int(score * 100))%)"
+            } else {
+                text = "Try again"
             }
-            return "Almost there"
+            return StatusPresentation(text: text, color: .secondary, showsSpinner: false)
+        case .cancelled:
+            return StatusPresentation(text: "Cancelled", color: .secondary, showsSpinner: false)
+        case .error(let message):
+            return StatusPresentation(text: message, color: .red, showsSpinner: false)
         }
     }
 

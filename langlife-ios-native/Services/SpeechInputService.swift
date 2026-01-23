@@ -211,10 +211,18 @@ final class SpeechInputService: NSObject, ObservableObject {
         stopRecording()
         if finalTranscript == nil, let finalCandidate {
             finalTranscript = finalCandidate
-        } else if finalTranscript == nil, finalCandidate == nil {
-            finalTranscript = ""
         }
         return finalCandidate
+    }
+
+    /// Cancel any in-flight recording without surfacing an error or transcript.
+    func cancelRecording() {
+        stopRecording()
+        transcript = ""
+        partialTranscript = ""
+        finalTranscript = nil
+        issue = nil
+        lastNonEmptyTranscript = ""
     }
 
     func reset() {
