@@ -11,6 +11,7 @@ import UIKit
 @MainActor
 final class AuthManager: ObservableObject {
     static let shared = AuthManager()
+    private static let signInTimeoutSeconds: UInt64 = 90
 
     @Published private(set) var session: Session?
     @Published private(set) var user: User?
@@ -138,9 +139,9 @@ final class AuthManager: ObservableObject {
     private func scheduleAuthStatusTimeout() {
         authStatusTimeoutTask?.cancel()
         authStatusTimeoutTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            try? await Task.sleep(nanoseconds: Self.signInTimeoutSeconds * 1_000_000_000)
             guard case .signingIn = authStatus else { return }
-            authStatus = .error(message: "Still finishing sign-in. Please try again.")
+            authStatus = .error(message: "Sign-in is taking too long. Please check your connection and try again.")
         }
     }
 
