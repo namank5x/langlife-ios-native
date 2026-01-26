@@ -169,6 +169,8 @@ struct PaywallScreen: View {
             }
             .font(.subheadline)
             .disabled(subscriptionManager.isProcessingPurchase)
+
+            legalLinks
         }
     }
 
@@ -177,6 +179,28 @@ struct PaywallScreen: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
+    }
+
+    private var legalLinks: some View {
+        let termsURL = AppConfig.termsOfServiceURL
+        let privacyURL = AppConfig.privacyPolicyURL
+
+        return Group {
+            if termsURL != nil || privacyURL != nil {
+                HStack(spacing: 12) {
+                    if let termsURL {
+                        Link("Terms of Use", destination: termsURL)
+                    }
+                    if let privacyURL {
+                        Link("Privacy Policy", destination: privacyURL)
+                    }
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+            }
+        }
     }
 
     private var selectedPackage: Package? {

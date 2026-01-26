@@ -84,7 +84,7 @@
 	<key>SUPPORT_EMAIL</key>
 	<string>support@wovenlabs.net</string>
 	<key>TERMS_OF_SERVICE_URL</key>
-	<string>https://www.langlife.app/terms</string>
+	<string>https://www.apple.com/legal/internet-services/itunes/dev/stdeula/</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

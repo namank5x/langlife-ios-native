@@ -197,7 +197,7 @@ struct SettingsView: View {
                 }
 
                 if termsURL != nil {
-                    Button("Terms of Service") {
+                    Button("Terms of Use") {
                         isTermsOfServicePresented = true
                     }
                 }
