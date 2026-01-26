@@ -25,12 +25,7 @@ struct StudyView: View {
     @State private var reviewErrorMessage: String?
     @State private var isSavingCard = false
     @State private var addCardError: String?
-    @State private var localSignInPresenter: UIViewController?
-    @State private var isSigningIn = false
-    @State private var isSignInOptionsPresented = false
-    @State private var pendingSignInProvider: SignInProvider?
-    @State private var shouldStartSignIn = false
-    @State private var signInError: String?
+    @State private var isLoginGatePresented = false
     @State private var pendingRating: Rating?
     @State private var pendingCardId: UUID?
     @State private var pendingAddCard = false
@@ -145,7 +140,6 @@ struct StudyView: View {
                                     .frame(maxWidth: .infinity, minHeight: actionButtonHeight)
                             }
                             .buttonStyle(.bordered)
-                            .disabled(isSigningIn)
 
                             Button {
                                 // "Easy" maps to Good for a more conservative schedule.
@@ -155,7 +149,6 @@ struct StudyView: View {
                                     .frame(maxWidth: .infinity, minHeight: actionButtonHeight)
                             }
                             .neutralProminentButton()
-                            .disabled(isSigningIn)
                         }
                         .controlSize(.large)
                         .frame(maxWidth: .infinity)
@@ -187,23 +180,10 @@ struct StudyView: View {
                     .padding(.top, 12)
             }
 
-            if let signInError {
-                Text(signInError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .padding(.top, 12)
-            }
-
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .background(
-            SignInPresenter(presenter: $localSignInPresenter)
-                .allowsHitTesting(false)
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-        )
         .sheet(isPresented: $isAddCardPresented) {
             NavigationStack {
                 AddCardSheet(
@@ -221,26 +201,12 @@ struct StudyView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(
-            isPresented: $isSignInOptionsPresented,
-            onDismiss: {
-                if pendingSignInProvider == nil {
-                    clearPendingActions()
-                }
-                shouldStartSignIn = pendingSignInProvider != nil
-                startPendingSignInIfPossible()
-            },
-            content: {
-                SignInOptionsSheet(
-                    onSelect: { provider in
-                        pendingSignInProvider = provider
-                        isSignInOptionsPresented = false
-                    }
-                )
-                .presentationDetents([.height(260)])
-                .presentationDragIndicator(.visible)
+        .fullScreenCover(isPresented: $isLoginGatePresented) {
+            LoginGateView(signInPresenter: $signInPresenter) {
+                clearPendingActions()
+                isLoginGatePresented = false
             }
-        )
+        }
         .fullScreenCover(isPresented: $isPaywallPresented) {
             PaywallScreen()
         }
@@ -256,7 +222,6 @@ struct StudyView: View {
             refreshDailyReviewCountIfNeeded()
         }
         .onChange(of: scenePhase) { _ in
-            startPendingSignInIfPossible()
             if scenePhase == .active {
                 refreshDailyReviewCountIfNeeded()
             }
@@ -272,7 +237,7 @@ struct StudyView: View {
                 guard authManager.user != nil else {
                     setPendingAddCard()
                     isAddCardPresented = false
-                    presentSignInOptions()
+                    presentLoginGate()
                     return
                 }
                 addCardError = nil
@@ -283,7 +248,7 @@ struct StudyView: View {
                 guard authManager.user != nil else {
                     setPendingManageCards()
                     isManageCardsPresented = false
-                    presentSignInOptions()
+                    presentLoginGate()
                     return
                 }
             }
@@ -292,6 +257,9 @@ struct StudyView: View {
             Task {
                 await loadCardIfNeeded()
                 completePendingActionsIfNeeded()
+            }
+            if authManager.user != nil {
+                isLoginGatePresented = false
             }
             if isAddCardPresented {
                 addCardError = authManager.user == nil ? "Please sign in to add a card." : nil
@@ -310,10 +278,17 @@ struct StudyView: View {
 
     @MainActor
     private func requestRating(_ rating: Rating) {
-        guard !isSigningIn else { return }
-        guard authManager.user != nil else {
-            setPendingRating(rating)
-            presentSignInOptions()
+        let dayStart = Calendar.current.startOfDay(for: Date())
+        if authManager.user == nil {
+            let guestCount = LocalReviewLimitStore.loadCount(userId: nil, dayStart: dayStart)
+            guard guestCount < 2 else {
+                reviewErrorMessage = nil
+                setPendingRating(rating)
+                presentLoginGate()
+                return
+            }
+            reviewErrorMessage = nil
+            handleRate(rating, dayStart: dayStart)
             return
         }
         if isLimitedRating(rating) {
@@ -323,7 +298,7 @@ struct StudyView: View {
                 return
             }
         }
-        handleRate(rating)
+        handleRate(rating, dayStart: dayStart)
     }
 
     @MainActor
@@ -379,119 +354,8 @@ struct StudyView: View {
         clearPendingRating()
     }
 
-    private func presentSignInOptions() {
-        guard !isSigningIn else { return }
-        signInError = nil
-        pendingSignInProvider = nil
-        shouldStartSignIn = false
-        isSignInOptionsPresented = true
-    }
-
-    @MainActor
-    private func signInWithApple() async {
-        guard !isSigningIn else { return }
-        isSigningIn = true
-        signInError = nil
-        defer { isSigningIn = false }
-
-        do {
-            try await authManager.signInWithApple()
-        } catch {
-            signInError = error.localizedDescription
-            clearPendingActions()
-        }
-    }
-
-    @MainActor
-    private func signInWithGoogle() async {
-        guard !isSigningIn else { return }
-        isSigningIn = true
-        signInError = nil
-
-        do {
-            let presenter = signInPresenter ?? localSignInPresenter
-            try await authManager.signInWithGoogle(presentingViewController: presenter)
-            isSigningIn = false
-        } catch {
-            isSigningIn = false
-            if isGoogleSignInCancelled(error) {
-                clearPendingActions()
-                return
-            }
-            signInError = error.localizedDescription
-            clearPendingActions()
-        }
-    }
-
-    private func isGoogleSignInCancelled(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == "com.google.GIDSignIn"
-            && nsError.code == -5
-    }
-
-    private func performSignIn(_ provider: SignInProvider) async {
-        switch provider {
-        case .apple:
-            await signInWithApple()
-        case .google:
-            await signInWithGoogle()
-        }
-    }
-
-    private func startPendingSignInIfPossible() {
-        guard shouldStartSignIn, scenePhase == .active,
-              let provider = pendingSignInProvider else { return }
-        shouldStartSignIn = false
-        Task { @MainActor in
-            await Task.yield()
-            await waitForStablePresentation()
-            defer { pendingSignInProvider = nil }
-            await performSignIn(provider)
-        }
-    }
-
-    @MainActor
-    private func waitForStablePresentation() async {
-        for _ in 0..<30 {
-            guard scenePhase == .active else {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                continue
-            }
-
-            if let presenter = signInPresenter ?? localSignInPresenter {
-                let root = presenter.view.window?.rootViewController ?? presenter
-                let top = topViewController(from: root)
-                if top.view.window != nil,
-                   !top.isBeingPresented,
-                   !top.isBeingDismissed {
-                    return
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-    }
-
-    private func topViewController(from rootViewController: UIViewController) -> UIViewController {
-        var topViewController = rootViewController
-        while true {
-            if let presented = topViewController.presentedViewController {
-                topViewController = presented
-                continue
-            }
-            if let navigationController = topViewController as? UINavigationController,
-               let visibleViewController = navigationController.visibleViewController {
-                topViewController = visibleViewController
-                continue
-            }
-            if let tabBarController = topViewController as? UITabBarController,
-               let selectedViewController = tabBarController.selectedViewController {
-                topViewController = selectedViewController
-                continue
-            }
-            break
-        }
-        return topViewController
+    private func presentLoginGate() {
+        isLoginGatePresented = true
     }
 
     @MainActor
@@ -546,7 +410,7 @@ struct StudyView: View {
     }
 
     @MainActor
-    private func handleRate(_ rating: Rating) {
+    private func handleRate(_ rating: Rating, dayStart: Date) {
         guard let card = currentCard else { return }
 
         let updatedCard = FSRS.reviewCard(card, rating: rating)
@@ -567,8 +431,10 @@ struct StudyView: View {
 
         isRevealed = false
         reviewErrorMessage = nil
-        if !subscriptionManager.isPro, isLimitedRating(rating), let userId = authManager.user?.id {
-            let dayStart = Calendar.current.startOfDay(for: Date())
+        if authManager.user == nil {
+            reviewActionCount = LocalReviewLimitStore.incrementCount(userId: nil, dayStart: dayStart)
+            reviewActionDayStart = dayStart
+        } else if !subscriptionManager.isPro, isLimitedRating(rating), let userId = authManager.user?.id {
             reviewActionCount = LocalReviewLimitStore.incrementCount(
                 userId: userId,
                 dayStart: dayStart

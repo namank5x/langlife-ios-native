@@ -28,12 +28,7 @@ struct SpeakView: View {
     @State private var isCreatingScene = false
     @State private var addSceneError: String?
     @State private var isGeneratingScene = false
-    @State private var localSignInPresenter: UIViewController?
-    @State private var isSigningIn = false
-    @State private var isSignInOptionsPresented = false
-    @State private var pendingSignInProvider: SignInProvider?
-    @State private var shouldStartSignIn = false
-    @State private var signInError: String?
+    @State private var isLoginGatePresented = false
     @State private var pendingSceneId: UUID?
     @State private var pendingAddScene = false
     @State private var pendingGenerateScene = false
@@ -104,20 +99,8 @@ struct SpeakView: View {
                     .padding(.top, 8)
             }
 
-            if let signInError {
-                Text(signInError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .padding(.top, 8)
-            }
         }
         .background(Color(.systemGroupedBackground))
-        .background(
-            SignInPresenter(presenter: $localSignInPresenter)
-                .allowsHitTesting(false)
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-        )
         .navigationDestination(item: $selectedScene) { scene in
             SpeakSceneDetailView(scene: scene) { deletedScene in
                 sceneStore.removeScene(id: deletedScene.id, userId: authManager.user?.id)
@@ -142,26 +125,12 @@ struct SpeakView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(
-            isPresented: $isSignInOptionsPresented,
-            onDismiss: {
-                if pendingSignInProvider == nil {
-                    clearPendingActions()
-                }
-                shouldStartSignIn = pendingSignInProvider != nil
-                startPendingSignInIfPossible()
-            },
-            content: {
-                SignInOptionsSheet(
-                    onSelect: { provider in
-                        pendingSignInProvider = provider
-                        isSignInOptionsPresented = false
-                    }
-                )
-                .presentationDetents([.height(260)])
-                .presentationDragIndicator(.visible)
+        .fullScreenCover(isPresented: $isLoginGatePresented) {
+            LoginGateView(signInPresenter: $signInPresenter) {
+                clearPendingActions()
+                isLoginGatePresented = false
             }
-        )
+        }
         .fullScreenCover(isPresented: $isPaywallPresented) {
             PaywallScreen()
         }
@@ -176,6 +145,9 @@ struct SpeakView: View {
                 await loadScenesIfNeeded()
                 await completePendingActionsIfNeeded()
             }
+            if authManager.user != nil {
+                isLoginGatePresented = false
+            }
             actionErrorMessage = nil
             updateAddSceneAvailability()
             updateGenerateSceneAvailability()
@@ -184,7 +156,6 @@ struct SpeakView: View {
             }
         }
         .onChange(of: scenePhase) { _ in
-            startPendingSignInIfPossible()
             if scenePhase == .active, let userId = authManager.user?.id {
                 Task {
                     await SceneSyncService.shared.syncIfNeeded(userId: userId)
@@ -209,7 +180,7 @@ struct SpeakView: View {
             guard authManager.user != nil else {
                 setPendingAddScene()
                 isAddScenePresented = false
-                presentSignInOptions()
+                presentLoginGate()
                 return
             }
             guard !isSceneLimitReached else {
@@ -236,7 +207,7 @@ struct SpeakView: View {
     private func requestSceneSelection(_ scene: SpeakScene) {
         guard authManager.user != nil else {
             setPendingScene(scene)
-            presentSignInOptions()
+            presentLoginGate()
             return
         }
         selectedSceneId = scene.id
@@ -246,7 +217,7 @@ struct SpeakView: View {
     private func handleGenerateSceneRequest() {
         guard authManager.user != nil else {
             setPendingGenerateScene()
-            presentSignInOptions()
+            presentLoginGate()
             return
         }
         guard !isSceneLimitReached else {
@@ -311,119 +282,8 @@ struct SpeakView: View {
         pendingGenerateScene = false
     }
 
-    private func presentSignInOptions() {
-        guard !isSigningIn else { return }
-        signInError = nil
-        pendingSignInProvider = nil
-        shouldStartSignIn = false
-        isSignInOptionsPresented = true
-    }
-
-    @MainActor
-    private func signInWithApple() async {
-        guard !isSigningIn else { return }
-        isSigningIn = true
-        signInError = nil
-        defer { isSigningIn = false }
-
-        do {
-            try await authManager.signInWithApple()
-        } catch {
-            signInError = error.localizedDescription
-            clearPendingActions()
-        }
-    }
-
-    @MainActor
-    private func signInWithGoogle() async {
-        guard !isSigningIn else { return }
-        isSigningIn = true
-        signInError = nil
-
-        do {
-            let presenter = signInPresenter ?? localSignInPresenter
-            try await authManager.signInWithGoogle(presentingViewController: presenter)
-            isSigningIn = false
-        } catch {
-            isSigningIn = false
-            if isGoogleSignInCancelled(error) {
-                clearPendingActions()
-                return
-            }
-            signInError = error.localizedDescription
-            clearPendingActions()
-        }
-    }
-
-    private func isGoogleSignInCancelled(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == "com.google.GIDSignIn"
-            && nsError.code == -5
-    }
-
-    private func performSignIn(_ provider: SignInProvider) async {
-        switch provider {
-        case .apple:
-            await signInWithApple()
-        case .google:
-            await signInWithGoogle()
-        }
-    }
-
-    private func startPendingSignInIfPossible() {
-        guard shouldStartSignIn, scenePhase == .active,
-              let provider = pendingSignInProvider else { return }
-        shouldStartSignIn = false
-        Task { @MainActor in
-            await Task.yield()
-            await waitForStablePresentation()
-            defer { pendingSignInProvider = nil }
-            await performSignIn(provider)
-        }
-    }
-
-    @MainActor
-    private func waitForStablePresentation() async {
-        for _ in 0..<30 {
-            guard scenePhase == .active else {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                continue
-            }
-
-            if let presenter = signInPresenter ?? localSignInPresenter {
-                let root = presenter.view.window?.rootViewController ?? presenter
-                let top = topViewController(from: root)
-                if top.view.window != nil,
-                   !top.isBeingPresented,
-                   !top.isBeingDismissed {
-                    return
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-    }
-
-    private func topViewController(from rootViewController: UIViewController) -> UIViewController {
-        var topViewController = rootViewController
-        while true {
-            if let presented = topViewController.presentedViewController {
-                topViewController = presented
-                continue
-            }
-            if let navigationController = topViewController as? UINavigationController,
-               let visibleViewController = navigationController.visibleViewController {
-                topViewController = visibleViewController
-                continue
-            }
-            if let tabBarController = topViewController as? UITabBarController,
-               let selectedViewController = tabBarController.selectedViewController {
-                topViewController = selectedViewController
-                continue
-            }
-            break
-        }
-        return topViewController
+    private func presentLoginGate() {
+        isLoginGatePresented = true
     }
 
     @MainActor

@@ -4,6 +4,10 @@ struct SpeakSceneDetailRepository {
     private let generator = SceneGenerationCoordinator()
 
     func fetchOutline(for scene: SpeakScene, userId: UUID?) async throws -> (outline: SpeakChatOutline, turns: [SpeakTurn]) {
+        if userId == nil, let content = DefaultSpeakContent.content(for: scene.id) {
+            return (content.outline, content.turns)
+        }
+
         let result = try await generator.generateOutline(scene: scene)
         if let userId {
             LocalSceneOutboxStore.enqueue(
@@ -25,6 +29,11 @@ struct SpeakSceneDetailRepository {
         step: Int,
         userId: UUID?
     ) async throws -> SpeakTurn {
+        if userId == nil,
+           let turn = DefaultSpeakContent.content(for: scene.id)?.turns.first(where: { $0.step == step }) {
+            return turn
+        }
+
         let turn = try await generator.generateTurn(
             scene: scene,
             outline: outline,

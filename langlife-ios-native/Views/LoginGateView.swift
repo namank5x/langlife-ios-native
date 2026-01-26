@@ -5,7 +5,9 @@ import AuthenticationServices
 struct LoginGateView: View {
     @EnvironmentObject private var authManager: AuthManager
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("guestModeEnabled") private var guestModeEnabled = false
     @Binding var signInPresenter: UIViewController?
+    let onSkip: (() -> Void)?
 
     @State private var localSignInPresenter: UIViewController?
     @State private var isOnboardingPresented = false
@@ -105,6 +107,21 @@ struct LoginGateView: View {
                 }
             )
         )
+        .overlay(alignment: .topTrailing) {
+            if !isSigningIn {
+                Button("Skip") {
+                    guestModeEnabled = true
+                    errorMessage = nil
+                    authManager.resetAuthStatus()
+                    onSkip?()
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 12)
+                .padding(.trailing, 16)
+                .transition(.opacity)
+            }
+        }
     }
 
     private var isSigningIn: Bool {

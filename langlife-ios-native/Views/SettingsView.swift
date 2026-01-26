@@ -1,6 +1,4 @@
 import Auth
-import AuthenticationServices
-import GoogleSignIn
 import MessageUI
 import RevenueCat
 import SafariServices
@@ -16,10 +14,7 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Binding var signInPresenter: UIViewController?
 
-    @State private var localSignInPresenter: UIViewController?
-    @State private var isSignInOptionsPresented = false
-    @State private var pendingSignInProvider: SignInProvider?
-    @State private var shouldStartSignIn = false
+    @State private var isLoginGatePresented = false
     @State private var errorMessage: String?
     @State private var isPaywallPresented = false
     @State private var pendingPaywallPresentation = false
@@ -42,17 +37,6 @@ struct SettingsView: View {
         return subscriptionManager.customerInfo?.managementURL
             ?? URL(string: "https://apps.apple.com/account/subscriptions")
     }
-    private var signInOptionsSheet: some View {
-        SignInOptionsSheet(
-            onSelect: { provider in
-                pendingSignInProvider = provider
-                isSignInOptionsPresented = false
-            }
-        )
-        .presentationDetents([.height(260)])
-        .presentationDragIndicator(.visible)
-    }
-
     private struct SupportMailDraft: Identifiable {
         let id = UUID()
         let subject: String
@@ -86,7 +70,7 @@ struct SettingsView: View {
                 .disabled(isDeletingAccount)
             } else {
                 Button {
-                    isSignInOptionsPresented = true
+                    isLoginGatePresented = true
                 } label: {
                     Text("Sign In")
                         .font(.headline)
@@ -95,7 +79,6 @@ struct SettingsView: View {
                         .background(Capsule().fill(AppColors.accent))
                 }
                 .buttonStyle(.plain)
-                .disabled(isSigningIn)
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 .listRowBackground(Color.clear)
             }
@@ -244,25 +227,12 @@ struct SettingsView: View {
                 deleteAccountSection
             }
             .navigationTitle("Settings")
-            .background(
-                SignInPresenter(presenter: $localSignInPresenter)
-                    .allowsHitTesting(false)
-                    .frame(width: 1, height: 1)
-                    .opacity(0.01)
-            )
-            .sheet(
-                isPresented: $isSignInOptionsPresented,
-                onDismiss: {
-                    if pendingSignInProvider == nil {
-                        pendingPaywallPresentation = false
-                    }
-                    shouldStartSignIn = pendingSignInProvider != nil
-                    startPendingSignInIfPossible()
-                },
-                content: {
-                    signInOptionsSheet
+            .fullScreenCover(isPresented: $isLoginGatePresented) {
+                LoginGateView(signInPresenter: $signInPresenter) {
+                    isLoginGatePresented = false
+                    pendingPaywallPresentation = false
+                }
             }
-            )
             .fullScreenCover(isPresented: $isPaywallPresented) {
                 PaywallScreen()
             }
@@ -298,10 +268,10 @@ struct SettingsView: View {
                     }
                 }
             }
-            .onChange(of: scenePhase) { _, _ in
-                startPendingSignInIfPossible()
-            }
             .onChange(of: authManager.user?.id) { _, _ in
+                if authManager.user != nil {
+                    isLoginGatePresented = false
+                }
                 handlePendingPaywallIfNeeded()
             }
             .task {
@@ -344,35 +314,11 @@ struct SettingsView: View {
         )
     }
 
-    private var isSigningIn: Bool {
-        if case .signingIn = authManager.authStatus {
-            return true
-        }
-        return false
-    }
-
     private var currentErrorMessage: String? {
         if case .error(let message) = authManager.authStatus {
             return message
         }
         return errorMessage
-    }
-
-    @MainActor
-    private func signInWithApple() async {
-        guard !isSigningIn else { return }
-        errorMessage = nil
-
-        do {
-            try await authManager.signInWithApple()
-        } catch {
-            if isAppleSignInCancelled(error) {
-                pendingPaywallPresentation = false
-                return
-            }
-            errorMessage = error.localizedDescription
-            pendingPaywallPresentation = false
-        }
     }
 
     @MainActor
@@ -404,36 +350,6 @@ struct SettingsView: View {
         }
     }
 
-    @MainActor
-    private func signInWithGoogle() async {
-        guard !isSigningIn else { return }
-        errorMessage = nil
-
-        do {
-            let presenter = signInPresenter ?? localSignInPresenter
-            try await authManager.signInWithGoogle(presentingViewController: presenter)
-        } catch {
-            if isGoogleSignInCancelled(error) {
-                pendingPaywallPresentation = false
-                return
-            }
-            errorMessage = error.localizedDescription
-            pendingPaywallPresentation = false
-        }
-    }
-
-    private func isAppleSignInCancelled(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == ASAuthorizationError.errorDomain
-            && nsError.code == ASAuthorizationError.canceled.rawValue
-    }
-
-    private func isGoogleSignInCancelled(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == "com.google.GIDSignIn"
-            && nsError.code == -5
-    }
-
     private func deleteAccountErrorMessage(for error: Error) -> String {
         if let apiError = error as? APIClientError,
            case APIClientError.httpError(let statusCode) = apiError,
@@ -444,84 +360,19 @@ struct SettingsView: View {
         return "Unable to delete your account right now."
     }
 
-    private func performSignIn(_ provider: SignInProvider) async {
-        switch provider {
-        case .apple:
-            await signInWithApple()
-        case .google:
-            await signInWithGoogle()
-        }
-    }
-
     private func presentPaywall() {
         guard authManager.user == nil else {
             isPaywallPresented = true
             return
         }
         pendingPaywallPresentation = true
-        isSignInOptionsPresented = true
+        isLoginGatePresented = true
     }
 
     private func handlePendingPaywallIfNeeded() {
         guard pendingPaywallPresentation, authManager.user != nil else { return }
         pendingPaywallPresentation = false
         isPaywallPresented = true
-    }
-
-    private func startPendingSignInIfPossible() {
-        guard shouldStartSignIn, scenePhase == .active,
-              let provider = pendingSignInProvider else { return }
-        shouldStartSignIn = false
-        Task { @MainActor in
-            await Task.yield()
-            await waitForStablePresentation()
-            defer { pendingSignInProvider = nil }
-            await performSignIn(provider)
-        }
-    }
-
-    @MainActor
-    private func waitForStablePresentation() async {
-        for _ in 0..<30 {
-            guard scenePhase == .active else {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                continue
-            }
-
-            if let presenter = signInPresenter ?? localSignInPresenter {
-                let root = presenter.view.window?.rootViewController ?? presenter
-                let top = topViewController(from: root)
-                if top.view.window != nil,
-                   !top.isBeingPresented,
-                   !top.isBeingDismissed {
-                    return
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-    }
-
-    private func topViewController(from rootViewController: UIViewController) -> UIViewController {
-        var topViewController = rootViewController
-        while true {
-            if let presented = topViewController.presentedViewController {
-                topViewController = presented
-                continue
-            }
-            if let navigationController = topViewController as? UINavigationController,
-               let visibleViewController = navigationController.visibleViewController {
-                topViewController = visibleViewController
-                continue
-            }
-            if let tabBarController = topViewController as? UITabBarController,
-               let selectedViewController = tabBarController.selectedViewController {
-                topViewController = selectedViewController
-                continue
-            }
-            break
-        }
-        return topViewController
     }
 
     private func contactSupport() {

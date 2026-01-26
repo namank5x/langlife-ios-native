@@ -38,16 +38,13 @@ final class SpeakSceneStore: ObservableObject {
             return
         }
 
-        errorMessage = nil
-        clearUserCacheIfNeeded()
-        scenes = []
+        loadGuestScenes()
     }
 
     func refresh(for userId: UUID?) async {
         if isRefreshing, lastLoadedUserId == userId { return }
         guard let userId else {
-            errorMessage = nil
-            scenes = []
+            loadGuestScenes()
             return
         }
 
@@ -223,5 +220,18 @@ final class SpeakSceneStore: ObservableObject {
         LocalSpeakSceneDetailStore.clearAll(userId: loadedUserId)
         lastLoadedUserId = nil
         scenes = []
+    }
+
+    private func loadGuestScenes() {
+        errorMessage = nil
+        let cached = LocalSpeakSceneStore.load(userId: nil)
+        if let cached, !cached.isEmpty {
+            scenes = cached
+        } else {
+            scenes = DefaultSpeakContent.scenes
+            LocalSpeakSceneStore.save(scenes, userId: nil)
+        }
+        lastLoadedUserId = nil
+        isLoading = false
     }
 }

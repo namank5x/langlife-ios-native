@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 enum LocalReviewLimitStore {
-    static func clear(userId: UUID) {
+    static func clear(userId: UUID?) {
         let userKey = LocalStoreKeys.userKey(userId)
         AppDatabase.write { db in
             try db.execute(
@@ -12,7 +12,7 @@ enum LocalReviewLimitStore {
         }
     }
 
-    static func loadCount(userId: UUID, dayStart: Date) -> Int {
+    static func loadCount(userId: UUID?, dayStart: Date) -> Int {
         let userKey = LocalStoreKeys.userKey(userId)
         let dayStartSeconds = dayStart.timeIntervalSince1970
         return AppDatabase.read { db in
@@ -28,7 +28,7 @@ enum LocalReviewLimitStore {
     }
 
     @discardableResult
-    static func incrementCount(userId: UUID, dayStart: Date) -> Int {
+    static func incrementCount(userId: UUID?, dayStart: Date) -> Int {
         let userKey = LocalStoreKeys.userKey(userId)
         let dayStartSeconds = dayStart.timeIntervalSince1970
         var newCount = 1

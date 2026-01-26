@@ -29,17 +29,13 @@ final class FlashcardStore: ObservableObject {
             return
         }
 
-        errorMessage = nil
-        clearUserCacheIfNeeded()
-        cards = []
+        loadGuestCards()
     }
 
     func refresh(for userId: UUID?) async {
         if isRefreshing, lastLoadedUserId == userId { return }
         guard let userId else {
-            errorMessage = nil
-            clearUserCacheIfNeeded()
-            cards = []
+            loadGuestCards()
             return
         }
 
@@ -259,6 +255,20 @@ final class FlashcardStore: ObservableObject {
         LocalFlashcardStore.clear(userId: loadedUserId)
         lastLoadedUserId = nil
         cards = []
+    }
+
+    private func loadGuestCards() {
+        errorMessage = nil
+        clearUserCacheIfNeeded()
+        if let cached = LocalFlashcardStore.load(userId: nil), !cached.isEmpty {
+            cards = cached
+            lastLoadedUserId = nil
+            return
+        }
+        let seeds = Array(FlashcardSeed.defaults.prefix(2)).map(Flashcard.initial)
+        cards = seeds
+        LocalFlashcardStore.save(seeds, userId: nil)
+        lastLoadedUserId = nil
     }
 }
 
