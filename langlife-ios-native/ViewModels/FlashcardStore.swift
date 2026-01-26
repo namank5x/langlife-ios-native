@@ -265,7 +265,7 @@ final class FlashcardStore: ObservableObject {
             lastLoadedUserId = nil
             return
         }
-        let seeds = Array(FlashcardSeed.defaults.prefix(2)).map(Flashcard.initial)
+        let seeds = Array(FlashcardSeed.defaults.prefix(15)).map(Flashcard.initial)
         cards = seeds
         LocalFlashcardStore.save(seeds, userId: nil)
         lastLoadedUserId = nil
