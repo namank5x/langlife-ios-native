@@ -33,6 +33,8 @@ struct SpeakView: View {
     @State private var pendingAddScene = false
     @State private var pendingGenerateScene = false
     @State private var isPaywallPresented = false
+    @State private var isVoiceSessionPresented = false
+    @State private var pendingVoiceSession = false
 
     private let creationRepository = SpeakSceneCreationRepository()
     private let generationRepository = SpeakSceneGenerationRepository()
@@ -42,6 +44,34 @@ struct SpeakView: View {
     }
     var body: some View {
         ScrollView {
+            Button {
+                requestVoiceSession()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform")
+                        .font(.title3)
+                        .frame(width: 40, height: 40)
+                        .foregroundStyle(AppColors.onAccent)
+                        .background(AppColors.accent, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Voice Practice")
+                            .font(.headline)
+                        Text("Have a conversation with an AI tutor")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(16)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+
             TagFlowLayout(spacing: 12, rowSpacing: 12) {
                 if isGeneratingScene {
                     Capsule()
@@ -133,6 +163,14 @@ struct SpeakView: View {
         }
         .fullScreenCover(isPresented: $isPaywallPresented) {
             PaywallScreen()
+        }
+        .fullScreenCover(isPresented: $isVoiceSessionPresented) {
+            VoiceSessionView()
+                .onDisappear {
+                    Task {
+                        await cardStore.refresh(for: authManager.user?.id)
+                    }
+                }
         }
         .refreshable {
             await sceneStore.refresh(for: authManager.user?.id)
@@ -255,6 +293,16 @@ struct SpeakView: View {
                 return
             }
             await generateScene()
+            return
+        }
+
+        if pendingVoiceSession {
+            pendingVoiceSession = false
+            guard subscriptionManager.isPro || isVoiceLimitAvailable else {
+                isPaywallPresented = true
+                return
+            }
+            isVoiceSessionPresented = true
         }
     }
 
@@ -262,21 +310,51 @@ struct SpeakView: View {
         pendingSceneId = scene.id
         pendingAddScene = false
         pendingGenerateScene = false
+        pendingVoiceSession = false
     }
 
     private func setPendingAddScene() {
         pendingAddScene = true
         pendingGenerateScene = false
         pendingSceneId = nil
+        pendingVoiceSession = false
     }
 
     private func setPendingGenerateScene() {
         pendingGenerateScene = true
         pendingAddScene = false
         pendingSceneId = nil
+        pendingVoiceSession = false
     }
 
     private func clearPendingActions() {
+        pendingSceneId = nil
+        pendingAddScene = false
+        pendingGenerateScene = false
+        pendingVoiceSession = false
+    }
+
+    private func requestVoiceSession() {
+        guard authManager.user != nil else {
+            setPendingVoiceSession()
+            presentLoginGate()
+            return
+        }
+        guard subscriptionManager.isPro || isVoiceLimitAvailable else {
+            isPaywallPresented = true
+            return
+        }
+        isVoiceSessionPresented = true
+    }
+
+    private var isVoiceLimitAvailable: Bool {
+        let dayStart = Calendar.current.startOfDay(for: Date())
+        let count = LocalVoiceSessionLimitStore.loadCount(userId: authManager.user?.id, dayStart: dayStart)
+        return count < SubscriptionLimits.freeVoiceDailyLimit
+    }
+
+    private func setPendingVoiceSession() {
+        pendingVoiceSession = true
         pendingSceneId = nil
         pendingAddScene = false
         pendingGenerateScene = false

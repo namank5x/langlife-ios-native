@@ -391,6 +391,12 @@ struct SettingsView: View {
         isSeedingHSK = true
         defer { isSeedingHSK = false }
         await cardStore.seedHSKCards(level: level, userId: authManager.user?.id)
+
+        if authManager.user != nil {
+            Task {
+                try? await UserProfileRepository().syncHSKLevel(level.rawValue)
+            }
+        }
     }
 
     private func presentPaywall() {

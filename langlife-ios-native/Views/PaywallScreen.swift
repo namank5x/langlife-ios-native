@@ -22,6 +22,11 @@ struct PaywallScreen: View {
             title: "Unlimited new cards",
             subtitle: "Add new vocabulary anytime.",
             icon: "plus.rectangle.on.rectangle"
+        ),
+        PaywallBenefit(
+            title: "Unlimited voice practice",
+            subtitle: "Talk with an AI tutor as much as you want.",
+            icon: "waveform"
         )
     ]
 

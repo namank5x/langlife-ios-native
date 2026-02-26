@@ -3,6 +3,7 @@ import SwiftUI
 struct OnboardingView: View {
     let onFinish: () -> Void
 
+    @EnvironmentObject private var authManager: AuthManager
     @AppStorage("hskLevel") private var hskLevel = 0
     @State private var selection = 0
     @State private var selectedLevel: HSKLevel = .hsk1
@@ -70,6 +71,11 @@ struct OnboardingView: View {
             selection += 1
         } else {
             hskLevel = selectedLevel.rawValue
+            if authManager.user != nil {
+                Task {
+                    try? await UserProfileRepository().syncHSKLevel(selectedLevel.rawValue)
+                }
+            }
             onFinish()
         }
     }

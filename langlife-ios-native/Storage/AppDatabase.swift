@@ -157,6 +157,14 @@ enum AppDatabase {
             try db.create(index: "speak_scene_details_user_scene", on: "speak_scene_details", columns: ["user_id", "scene_id"])
             try db.create(index: "speak_scene_turns_user_scene_step", on: "speak_scene_turns", columns: ["user_id", "scene_id", "step"], unique: true)
         }
+        migrator.registerMigration("addVoiceSessionLimits") { db in
+            try db.create(table: "voice_session_limits") { table in
+                table.column("user_id", .text).notNull()
+                table.column("day_start", .double).notNull()
+                table.column("count", .integer).notNull()
+                table.primaryKey(["user_id", "day_start"], onConflict: .replace)
+            }
+        }
         return migrator
     }
 }
