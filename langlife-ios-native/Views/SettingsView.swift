@@ -1,7 +1,6 @@
 import Auth
 import MessageUI
 import RevenueCat
-import SafariServices
 import SwiftUI
 import UIKit
 
@@ -9,6 +8,8 @@ struct SettingsView: View {
 
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
+    @EnvironmentObject private var cardStore: FlashcardStore
+    @AppStorage("hskLevel") private var hskLevel = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -26,6 +27,7 @@ struct SettingsView: View {
     @State private var deleteAccountErrorMessage: String?
     @State private var isPrivacyPolicyPresented = false
     @State private var isTermsOfServicePresented = false
+    @State private var isSeedingHSK = false
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -42,16 +44,6 @@ struct SettingsView: View {
         let subject: String
         let recipients: [String]
         let body: String
-    }
-
-    private struct SafariView: UIViewControllerRepresentable {
-        let url: URL
-
-        func makeUIViewController(context: Context) -> SFSafariViewController {
-            SFSafariViewController(url: url)
-        }
-
-        func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
     }
 
     @ViewBuilder
@@ -149,6 +141,37 @@ struct SettingsView: View {
         }
     }
 
+    private var hskLevelBinding: HSKLevel {
+        get { HSKLevel(rawValue: hskLevel) ?? .hsk1 }
+        nonmutating set { Task { await changeHSKLevel(to: newValue) } }
+    }
+
+    private var hskLevelSection: some View {
+        Section("Level") {
+            NavigationLink {
+                HSKLevelPickerView(
+                    selectedLevel: Binding<HSKLevel>(
+                        get: { hskLevelBinding },
+                        set: { hskLevelBinding = $0 }
+                    ),
+                    isSeedingHSK: isSeedingHSK
+                )
+            } label: {
+                HStack {
+                    Text("Level")
+                    Spacer()
+                    if isSeedingHSK {
+                        ProgressView()
+                    } else {
+                        Text(hskLevelBinding.displayName)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .disabled(isSeedingHSK)
+        }
+    }
+
     private var supportSection: some View {
         Section("Support") {
             Button("Contact Support") {
@@ -221,6 +244,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 accountSection
+                hskLevelSection
                 subscriptionSection
                 supportSection
                 privacyPolicySection
@@ -238,12 +262,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $isPrivacyPolicyPresented) {
                 if let privacyURL = AppConfig.privacyPolicyURL {
-                    SafariView(url: privacyURL)
+                    InAppSafariView(url: privacyURL)
                 }
             }
             .sheet(isPresented: $isTermsOfServicePresented) {
                 if let termsURL = AppConfig.termsOfServiceURL {
-                    SafariView(url: termsURL)
+                    InAppSafariView(url: termsURL)
                 }
             }
             .fullScreenCover(isPresented: $isOnboardingPresented) {
@@ -360,6 +384,15 @@ struct SettingsView: View {
         return "Unable to delete your account right now."
     }
 
+    @MainActor
+    private func changeHSKLevel(to level: HSKLevel) async {
+        guard !isSeedingHSK else { return }
+        hskLevel = level.rawValue
+        isSeedingHSK = true
+        defer { isSeedingHSK = false }
+        await cardStore.seedHSKCards(level: level, userId: authManager.user?.id)
+    }
+
     private func presentPaywall() {
         guard authManager.user == nil else {
             isPaywallPresented = true
@@ -425,8 +458,62 @@ struct SettingsView: View {
 
 }
 
+private struct HSKLevelPickerView: View {
+    @Binding var selectedLevel: HSKLevel
+    let isSeedingHSK: Bool
+    @State private var isHSKInfoPresented = false
+
+    var body: some View {
+        List {
+            ForEach(HSKLevel.allCases, id: \.rawValue) { (level: HSKLevel) in
+                Button {
+                    selectedLevel = level
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(level.displayName)
+                                .font(.body.weight(.semibold))
+                            Text(level.description)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("\(level.cumulativeWordCount) words")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        if selectedLevel == level {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.tint)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isSeedingHSK)
+            }
+
+            if AppConfig.hskInfoURL != nil {
+                Button {
+                    isHSKInfoPresented = true
+                } label: {
+                    Label("Learn more about HSK", systemImage: "info.circle")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .disabled(isSeedingHSK)
+            }
+        }
+        .sheet(isPresented: $isHSKInfoPresented) {
+            if let hskInfoURL = AppConfig.hskInfoURL {
+                InAppSafariView(url: hskInfoURL)
+            }
+        }
+        .navigationTitle("Level")
+    }
+}
+
 #Preview {
     SettingsView(signInPresenter: .constant(nil))
         .environmentObject(AuthManager.shared)
+        .environmentObject(FlashcardStore())
         .environmentObject(SubscriptionManager.shared)
 }

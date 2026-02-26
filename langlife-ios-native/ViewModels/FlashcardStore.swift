@@ -265,10 +265,62 @@ final class FlashcardStore: ObservableObject {
             lastLoadedUserId = nil
             return
         }
-        let seeds = Array(FlashcardSeed.defaults.prefix(15)).map(Flashcard.initial)
+        let hskLevel = UserDefaults.standard.integer(forKey: "hskLevel")
+        guard hskLevel > 0, let level = HSKLevel(rawValue: hskLevel) else {
+            cards = []
+            lastLoadedUserId = nil
+            return
+        }
+        let seeds = HSKWordBank.words(upTo: level).map { Flashcard.initial(from: FlashcardSeed.from($0)) }
         cards = seeds
         LocalFlashcardStore.save(seeds, userId: nil)
         lastLoadedUserId = nil
+    }
+
+    func seedHSKCards(level: HSKLevel, userId: UUID?) async {
+        errorMessage = nil
+
+        let words = HSKWordBank.words(upTo: level)
+        let existingKeys = Set(cards.map {
+            FlashcardSeed.buildPhraseKey(chinese: $0.chinese, pinyin: $0.pinyin, english: $0.english)
+        })
+
+        let newCards = words
+            .map { FlashcardSeed.from($0) }
+            .filter { !existingKeys.contains(FlashcardSeed.buildPhraseKey(chinese: $0.chinese, pinyin: $0.pinyin, english: $0.english)) }
+            .map { Flashcard.initial(from: $0) }
+
+        guard !newCards.isEmpty else { return }
+
+        if let userId {
+            var insertedSoFar: [Flashcard] = []
+            do {
+                for batch in newCards.chunked(into: 100) {
+                    try await repository.upsertIgnoringDuplicates(cards: batch, userId: userId)
+                    insertedSoFar.append(contentsOf: batch)
+                    cards.append(contentsOf: batch)
+                }
+                LocalFlashcardStore.save(cards, userId: userId)
+                touchSyncState(userId: userId)
+            } catch {
+                if !insertedSoFar.isEmpty {
+                    LocalFlashcardStore.save(cards, userId: userId)
+                    touchSyncState(userId: userId)
+                }
+                errorMessage = error.isOffline
+                    ? Self.offlineMessage
+                    : "Could not add new cards right now."
+            }
+        } else {
+            cards.append(contentsOf: newCards)
+            LocalFlashcardStore.save(cards, userId: nil)
+        }
+    }
+
+    func seedHSKCardsIfNeeded(userId: UUID) async {
+        let hskLevel = UserDefaults.standard.integer(forKey: "hskLevel")
+        guard hskLevel > 0, let level = HSKLevel(rawValue: hskLevel) else { return }
+        await seedHSKCards(level: level, userId: userId)
     }
 }
 

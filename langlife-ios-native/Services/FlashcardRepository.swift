@@ -42,6 +42,20 @@ struct FlashcardRepository {
             .execute()
     }
 
+    func insertBatched(cards: [Flashcard], userId: UUID, batchSize: Int = 100) async throws {
+        for batch in cards.chunked(into: batchSize) {
+            try await insert(cards: batch, userId: userId)
+        }
+    }
+
+    func upsertIgnoringDuplicates(cards: [Flashcard], userId: UUID) async throws {
+        let payload = cards.map { $0.toInsert(userId: userId) }
+        _ = try await supabase
+            .from("flashcards")
+            .upsert(payload, onConflict: "user_id,phrase_key", ignoreDuplicates: true)
+            .execute()
+    }
+
     func update(card: Flashcard, userId: UUID) async throws {
         let payload = FlashcardReviewUpdate(card: card)
         _ = try await supabase
@@ -84,5 +98,13 @@ struct FlashcardRepository {
             .eq("id", value: cardId.uuidString)
             .eq("user_id", value: userId.uuidString)
             .execute()
+    }
+}
+
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }

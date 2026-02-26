@@ -58,6 +58,13 @@ enum AppConfig {
         return validatedURL(from: value, key: "TERMS_OF_SERVICE_URL")
     }
 
+    static var hskInfoURL: URL? {
+        guard let value = SupabaseConfig["HSK_INFO_URL"], !value.isEmpty else {
+            return nil
+        }
+        return validatedURL(from: value, key: "HSK_INFO_URL")
+    }
+
     private static func validatedURL(for key: String) -> URL {
         guard let value = SupabaseConfig[key], !value.isEmpty else {
             preconditionFailure("Missing \(key) in app configuration")

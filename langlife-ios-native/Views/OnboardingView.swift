@@ -3,7 +3,9 @@ import SwiftUI
 struct OnboardingView: View {
     let onFinish: () -> Void
 
+    @AppStorage("hskLevel") private var hskLevel = 0
     @State private var selection = 0
+    @State private var selectedLevel: HSKLevel = .hsk1
 
     private let steps = OnboardingStep.allCases
 
@@ -16,7 +18,7 @@ struct OnboardingView: View {
 
                 TabView(selection: $selection) {
                     ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                        OnboardingPageView(step: step)
+                        OnboardingPageView(step: step, selectedLevel: $selectedLevel)
                             .tag(index)
                     }
                 }
@@ -67,6 +69,7 @@ struct OnboardingView: View {
         if selection < steps.count - 1 {
             selection += 1
         } else {
+            hskLevel = selectedLevel.rawValue
             onFinish()
         }
     }
@@ -77,6 +80,7 @@ private enum OnboardingStep: Int, CaseIterable, Identifiable {
     case generateScenes
     case autoCards
     case addCards
+    case hskLevel
 
     var id: Int { rawValue }
 
@@ -90,6 +94,8 @@ private enum OnboardingStep: Int, CaseIterable, Identifiable {
             return "Cards appear automatically"
         case .addCards:
             return "Add your own cards"
+        case .hskLevel:
+            return "Choose your level"
         }
     }
 
@@ -103,12 +109,15 @@ private enum OnboardingStep: Int, CaseIterable, Identifiable {
             return "New words from each scene turn into flashcards for review."
         case .addCards:
             return "Save the phrases you want and practice them anytime."
+        case .hskLevel:
+            return "Pick an HSK level to start with. You can change it later in Settings."
         }
     }
 }
 
 private struct OnboardingPageView: View {
     let step: OnboardingStep
+    @Binding var selectedLevel: HSKLevel
 
     var body: some View {
         VStack(spacing: 20) {
@@ -145,6 +154,8 @@ private struct OnboardingPageView: View {
             AutoCardsHero()
         case .addCards:
             AddCardsHero()
+        case .hskLevel:
+            HSKLevelPickerHero(selectedLevel: $selectedLevel)
         }
     }
 }
@@ -394,6 +405,85 @@ private struct AddCardsHero: View {
             Text(isSaved ? "Card saved for practice." : "Tap the plus to save your own cards.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color(.separator).opacity(0.2), lineWidth: 1)
+        )
+    }
+}
+
+private struct HSKLevelPickerHero: View {
+    @Binding var selectedLevel: HSKLevel
+    @State private var isHSKInfoPresented = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(HSKLevel.allCases, id: \.rawValue) { level in
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        selectedLevel = level
+                    }
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(level.displayName)
+                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+
+                            Text(level.description)
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+
+                            Text("\(level.cumulativeWordCount) words")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        Spacer()
+
+                        if selectedLevel == level {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(AppColors.accent)
+                        }
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(
+                                selectedLevel == level ? AppColors.accent : Color(.separator).opacity(0.2),
+                                lineWidth: selectedLevel == level ? 2 : 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if AppConfig.hskInfoURL != nil {
+                Button {
+                    isHSKInfoPresented = true
+                } label: {
+                    Label("Learn more about HSK", systemImage: "info.circle")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+            }
+        }
+        .sheet(isPresented: $isHSKInfoPresented) {
+            if let hskInfoURL = AppConfig.hskInfoURL {
+                InAppSafariView(url: hskInfoURL)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity)

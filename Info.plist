@@ -35,6 +35,8 @@
 	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
 	<key>GOOGLE_SERVER_CLIENT_ID</key>
 	<string>$(GOOGLE_SERVER_CLIENT_ID)</string>
+	<key>HSK_INFO_URL</key>
+	<string>https://en.wikipedia.org/wiki/Hanyu_Shuiping_Kaoshi</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>

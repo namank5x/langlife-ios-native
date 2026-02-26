@@ -8,7 +8,7 @@ struct RootView: View {
     @AppStorage("guestModeEnabled") private var guestModeEnabled = false
     @Binding var signInPresenter: UIViewController?
 
-    private let currentOnboardingVersion = 1
+    private let currentOnboardingVersion = 2
 
     var body: some View {
         mainContent
